@@ -1,0 +1,18 @@
+[package]
+name = "fossil-indexer"
+description = "Tree-sitter based symbol extractor and call graph builder for fossil-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+fossil-core.workspace = true
+tree-sitter.workspace = true
+tree-sitter-rust.workspace = true
+tree-sitter-python.workspace = true
+tree-sitter-typescript.workspace = true
+rayon.workspace = true
+walkdir.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

@@ -1,0 +1,28 @@
+[package]
+name = "fossil-server"
+description = "MCP server entry point for fossil-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "fossil-mcp"
+path = "src/main.rs"
+
+[dependencies]
+fossil-core.workspace = true
+fossil-repo.workspace = true
+fossil-indexer.workspace = true
+fossil-search.workspace = true
+
+rmcp = { version = "2.1.0", features = ["server", "macros", "transport-io"] }
+schemars.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true

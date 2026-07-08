@@ -1,0 +1,12 @@
+[package]
+name = "fossil-search"
+description = "Fuzzy symbol search engine for fossil-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+fossil-core.workspace = true
+nucleo-matcher.workspace = true
+thiserror.workspace = true

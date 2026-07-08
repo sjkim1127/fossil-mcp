@@ -1,0 +1,16 @@
+[package]
+name = "fossil-core"
+description = "Shared types, errors, and storage layer for fossil-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+tracing.workspace = true

@@ -1,0 +1,69 @@
+[workspace]
+members = [
+    "crates/fossil-core",
+    "crates/fossil-repo",
+    "crates/fossil-indexer",
+    "crates/fossil-search",
+    "crates/fossil-server",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/sjkim1127/fossil-mcp"
+
+[workspace.dependencies]
+# Internal crates
+fossil-core = { path = "crates/fossil-core" }
+fossil-repo = { path = "crates/fossil-repo" }
+fossil-indexer = { path = "crates/fossil-indexer" }
+fossil-search = { path = "crates/fossil-search" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# MCP
+rmcp = { version = "2.1.0", features = ["server", "macros", "transport-io"] }
+schemars = "0.8"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Git
+git2 = { version = "0.21", default-features = false }
+
+# Hashing
+sha2 = "0.10"
+hex = "0.4"
+
+# Tree-sitter
+tree-sitter = "0.26"
+tree-sitter-rust = "0.24"
+tree-sitter-python = "0.25"
+tree-sitter-typescript = "0.23"
+
+# Search
+nucleo-matcher = "0.3"
+
+# Storage
+rusqlite = { version = "0.40", features = ["bundled"] }
+
+# Parallel
+rayon = "1"
+
+# Utilities
+walkdir = "2"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "6"

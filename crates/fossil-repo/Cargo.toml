@@ -1,0 +1,17 @@
+[package]
+name = "fossil-repo"
+description = "Git clone and cache management for fossil-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+fossil-core.workspace = true
+git2.workspace = true
+sha2.workspace = true
+hex.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+chrono.workspace = true

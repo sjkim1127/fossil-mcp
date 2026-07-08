@@ -1,0 +1,106 @@
+use std::path::Path;
+
+use git2::FetchOptions;
+use tracing::{debug, info};
+
+use fossil_core::types::RepoMeta;
+
+use crate::cache::{CacheManager, repo_id_from_url};
+use crate::error::RepoError;
+
+/// Options controlling how a repository is cloned.
+pub struct CloneOptions<'a> {
+    pub url: &'a str,
+    pub alias: Option<String>,
+    pub branch: Option<String>,
+    /// If true, delete the existing cache directory and re-clone.
+    pub refresh: bool,
+}
+
+/// Clone a public repository (shallow, depth=1) into the fossil-mcp cache.
+///
+/// If the repo is already cached and `refresh` is false, the existing clone is
+/// reused and the function returns immediately with the cached metadata.
+pub fn clone_repo(opts: CloneOptions<'_>) -> Result<RepoMeta, RepoError> {
+    CacheManager::ensure_root()?;
+
+    let repo_id = repo_id_from_url(opts.url);
+    let repo_dir = CacheManager::repo_dir(&repo_id);
+
+    // Handle refresh: blow away existing cache.
+    if opts.refresh && repo_dir.exists() {
+        info!("Refreshing cache for repo_id={}", repo_id);
+        CacheManager::remove(&repo_id)?;
+    }
+
+    // Reuse existing clone.
+    if repo_dir.exists() {
+        debug!("Cache hit for repo_id={} at {:?}", repo_id, repo_dir);
+        let store = CacheManager::open_store(&repo_id)?;
+        return store
+            .get_repo(&repo_id)
+            .map_err(|e| RepoError::Storage(e.into()))
+            .or_else(|_| {
+                // DB exists but no row yet — synthesise metadata.
+                Ok(RepoMeta {
+                    repo_id: repo_id.clone(),
+                    url: opts.url.to_string(),
+                    alias: opts.alias.clone(),
+                    path: repo_dir.clone(),
+                    indexed_at: None,
+                    symbol_count: 0,
+                })
+            });
+    }
+
+    // Fresh clone.
+    info!(
+        "Cloning {} (branch={:?}) → {:?}",
+        opts.url, opts.branch, repo_dir
+    );
+    std::fs::create_dir_all(&repo_dir)?;
+
+    do_shallow_clone(opts.url, opts.branch.as_deref(), &repo_dir).map_err(|e| {
+        // Clean up the partially-created directory on failure.
+        let _ = std::fs::remove_dir_all(&repo_dir);
+        RepoError::CloneFailed {
+            url: opts.url.to_string(),
+            source: e,
+        }
+    })?;
+
+    let meta = RepoMeta {
+        repo_id: repo_id.clone(),
+        url: opts.url.to_string(),
+        alias: opts.alias,
+        path: repo_dir,
+        indexed_at: None,
+        symbol_count: 0,
+    };
+
+    // Persist metadata to the repo's SQLite DB.
+    let store = CacheManager::open_store(&repo_id)?;
+    store
+        .upsert_repo(&meta)
+        .map_err(|e| RepoError::Storage(e))?;
+
+    info!("Clone complete for repo_id={}", repo_id);
+    Ok(meta)
+}
+
+/// Perform the actual libgit2 shallow clone (depth=1).
+fn do_shallow_clone(url: &str, branch: Option<&str>, into: &Path) -> Result<(), git2::Error> {
+    let mut fetch_opts = FetchOptions::new();
+    // Shallow clone: fetch only the most recent commit.
+    fetch_opts.depth(1);
+
+    let mut builder = git2::build::RepoBuilder::new();
+    builder.fetch_options(fetch_opts);
+
+    if let Some(b) = branch {
+        builder.branch(b);
+    }
+
+    builder.clone(url, into)?;
+    Ok(())
+}
