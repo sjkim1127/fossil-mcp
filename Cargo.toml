@@ -41,8 +41,8 @@ serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Git
-git2 = { version = "0.21", default-features = false }
+# Git (vendored-libgit2 = compile libgit2 from source; required for cross-compilation in CI)
+git2 = { version = "0.21", features = ["vendored-libgit2"] }
 
 # Hashing
 sha2 = "0.10"

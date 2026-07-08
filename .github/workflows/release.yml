@@ -1,0 +1,210 @@
+name: Release
+
+# Triggered when a semver tag is pushed: v0.1.0, v1.2.3, etc.
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARY_NAME: fossil-mcp
+
+# Permissions needed to create GitHub Releases and upload assets.
+permissions:
+  contents: write
+
+jobs:
+  # ── Build release binaries ────────────────────────────────────────────────
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux – x86_64, statically linked via musl (maximum portability)
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            use_cross: false
+            archive_ext: tar.gz
+
+          # Linux – ARM64
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            use_cross: true           # use `cross` for ARM cross-compilation
+            archive_ext: tar.gz
+
+          # macOS – Intel
+          - target: x86_64-apple-darwin
+            runner: macos-13          # macos-13 = last x86_64 runner
+            use_cross: false
+            archive_ext: tar.gz
+
+          # macOS – Apple Silicon
+          - target: aarch64-apple-darwin
+            runner: macos-latest      # macos-latest = M-series (arm64)
+            use_cross: false
+            archive_ext: tar.gz
+
+          # Windows – x86_64
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            use_cross: false
+            archive_ext: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── System dependencies ──────────────────────────────────────────────
+
+      - name: Install system deps (Linux, non-cross)
+        if: runner.os == 'Linux' && !matrix.use_cross
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake pkg-config libssl-dev musl-tools
+
+      - name: Install system deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake pkg-config openssl
+
+      # ── Rust toolchain ────────────────────────────────────────────────────
+
+      - name: Install Rust stable + target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo registry & build artefacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      # ── Install `cross` for cross-compilation ─────────────────────────────
+
+      - name: Install cross
+        if: matrix.use_cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      # ── Build ─────────────────────────────────────────────────────────────
+
+      - name: Build release binary (cross)
+        if: matrix.use_cross
+        run: cross build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
+
+      - name: Build release binary (cargo)
+        if: '!matrix.use_cross'
+        run: cargo build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
+
+      # ── Package ───────────────────────────────────────────────────────────
+
+      - name: Determine binary path
+        id: bin
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "path=target/${{ matrix.target }}/release/fossil-mcp.exe" >> "$GITHUB_OUTPUT"
+            echo "name=fossil-mcp.exe" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=target/${{ matrix.target }}/release/fossil-mcp" >> "$GITHUB_OUTPUT"
+            echo "name=fossil-mcp" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Determine archive name
+        id: archive
+        shell: bash
+        run: |
+          VERSION="${{ github.ref_name }}"
+          echo "name=fossil-mcp-${VERSION}-${{ matrix.target }}" >> "$GITHUB_OUTPUT"
+
+      # tar.gz (Unix)
+      - name: Package (tar.gz)
+        if: matrix.archive_ext == 'tar.gz'
+        run: |
+          ARCHIVE="${{ steps.archive.outputs.name }}.tar.gz"
+          cp "${{ steps.bin.outputs.path }}" "${{ steps.bin.outputs.name }}"
+          tar -czf "$ARCHIVE" \
+            "${{ steps.bin.outputs.name }}" \
+            README.md \
+            LICENSE
+          echo "ASSET=$ARCHIVE" >> "$GITHUB_ENV"
+
+      # zip (Windows)
+      - name: Package (zip)
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          $archive = "${{ steps.archive.outputs.name }}.zip"
+          Copy-Item "${{ steps.bin.outputs.path }}" "${{ steps.bin.outputs.name }}"
+          Compress-Archive -Path "${{ steps.bin.outputs.name }}", "README.md", "LICENSE" `
+                           -DestinationPath $archive
+          "ASSET=$archive" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # ── Upload artefact for the release job ───────────────────────────────
+
+      - name: Upload build artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.archive.outputs.name }}
+          path: ${{ env.ASSET }}
+          retention-days: 1
+
+  # ── Create GitHub Release & upload assets ─────────────────────────────────
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Download all build artefacts into ./dist/
+      - name: Download all artefacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: List artefacts
+        run: ls -lh dist/
+
+      # Generate a SHA-256 checksum file
+      - name: Generate checksums
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # Extract the version and the changelog section for this tag
+      - name: Extract release notes
+        id: notes
+        shell: bash
+        run: |
+          VERSION="${{ github.ref_name }}"
+          # If a CHANGELOG.md exists, try to extract the matching section.
+          # Fall back to a generic message when no CHANGELOG is present.
+          if [[ -f CHANGELOG.md ]]; then
+            # Extract block between the current tag heading and the next one.
+            awk "/^## \[?${VERSION#v}\]?/{found=1; next} found && /^## /{exit} found{print}" \
+              CHANGELOG.md > release_notes.md
+          fi
+          if [[ ! -s release_notes.md ]]; then
+            echo "Release ${VERSION}" > release_notes.md
+            echo "" >> release_notes.md
+            echo "See [README](https://github.com/${{ github.repository }}/blob/main/README.md) for usage." >> release_notes.md
+          fi
+          echo "file=release_notes.md" >> "$GITHUB_OUTPUT"
+
+      # Create the release (draft=false → publish immediately)
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "${{ github.ref_name }}"
+          body_path: ${{ steps.notes.outputs.file }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}  # v1.0.0-rc.1 → prerelease
+          files: |
+            dist/**
+          fail_on_unmatched_files: true
