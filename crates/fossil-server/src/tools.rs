@@ -10,8 +10,8 @@ use serde_json::json;
 use tracing::{debug, info};
 
 use fossil_core::storage::GlobalStore;
-use fossil_indexer::{index_directory, languages::default_registry, parse_scip_index};
-use fossil_repo::{cache::CacheManager, clone::CloneOptions};
+use fossil_indexer::{index_directory, languages::default_registry, migration, parse_scip_index};
+use fossil_repo::{cache::CacheManager, clone::CloneOptions, history};
 use fossil_search::{FuzzySearcher, semantic::SemanticSearcher, traits::Searcher};
 
 // ── Input types ───────────────────────────────────────────────────────────────
@@ -26,6 +26,18 @@ pub struct CloneReferenceInput {
     pub branch: Option<String>,
     #[schemars(description = "If true, delete existing cache and re-clone")]
     pub refresh: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AnalyzeMigrationInput {
+    #[schemars(description = "Repository ID containing the migration")]
+    pub repo_id: String,
+    #[schemars(description = "The starting git revision (e.g. 'v16.0.0' or commit hash)")]
+    pub start_revision: String,
+    #[schemars(description = "The ending git revision (e.g. 'v18.0.0' or commit hash)")]
+    pub end_revision: String,
+    #[schemars(description = "File glob pattern to analyze (e.g. '*.ts' or '*.rs')")]
+    pub file_pattern: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -510,6 +522,62 @@ impl FossilServer {
             top_k: Some(10), // Give a generous top_k for broad feature analysis
         }))
         .await
+    }
+
+    // ── analyze_migration ───────────────────────────────────────────────────
+
+    #[tool(
+        description = "Analyzes a git history between two revisions to extract structural AST migration patterns."
+    )]
+    async fn analyze_migration(
+        &self,
+        Parameters(input): Parameters<AnalyzeMigrationInput>,
+    ) -> Result<String, McpError> {
+        info!(
+            "analyze_migration: repo_id={} revs={}-{}",
+            input.repo_id, input.start_revision, input.end_revision
+        );
+
+        let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
+            let repo_dir = CacheManager::repo_dir(&input.repo_id);
+            if !repo_dir.exists() {
+                return Err(format!(
+                    "Repository '{}' not found. Run clone_reference first.",
+                    input.repo_id
+                ));
+            }
+
+            let changes = history::get_file_changes(
+                &repo_dir,
+                &input.start_revision,
+                &input.end_revision,
+                &input.file_pattern,
+            )
+            .map_err(|e| e.to_string())?;
+
+            let registry = default_registry();
+            let mut patterns = Vec::new();
+
+            for change in changes {
+                if let Some(pattern) = migration::extract_structural_diff(
+                    &registry,
+                    &change.file_path,
+                    &change.before_content,
+                    &change.after_content,
+                    &change.changed_lines_before,
+                    &change.changed_lines_after,
+                ) {
+                    patterns.push(pattern);
+                }
+            }
+
+            Ok(serde_json::to_value(patterns).map_err(|e| e.to_string())?)
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        Ok(result.to_string())
     }
 }
 

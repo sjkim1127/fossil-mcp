@@ -9,3 +9,4 @@ pub use error::IndexError;
 pub use parser::{LanguageParser, ParserRegistry};
 pub use scip::parse_scip_index;
 pub use symbol::index_directory;
+pub mod migration;
