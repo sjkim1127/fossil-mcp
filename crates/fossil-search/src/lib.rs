@@ -1,5 +1,6 @@
 pub mod error;
 pub mod fuzzy;
+pub mod semantic;
 pub mod traits;
 
 pub use error::SearchError;

@@ -42,7 +42,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Git (vendored-libgit2 = compile libgit2 from source; required for cross-compilation in CI)
-git2 = { version = "0.21", features = ["vendored-libgit2"] }
+git2 = "0.21"
 
 # Hashing
 sha2 = "0.10"
@@ -56,6 +56,7 @@ tree-sitter-typescript = "0.23"
 
 # Search
 nucleo-matcher = "0.3"
+fastembed = "5"
 
 # Storage
 rusqlite = { version = "0.40", features = ["bundled"] }

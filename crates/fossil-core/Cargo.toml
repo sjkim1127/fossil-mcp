@@ -10,7 +10,9 @@ license.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-rusqlite.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+sqlite-vec = "0.1"
 chrono.workspace = true
 dirs.workspace = true
 tracing.workspace = true
+bytemuck = "1.25.0"

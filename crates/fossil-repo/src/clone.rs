@@ -101,6 +101,23 @@ fn do_shallow_clone(url: &str, branch: Option<&str>, into: &Path) -> Result<(), 
         builder.branch(b);
     }
 
-    builder.clone(url, into)?;
+    if let Err(e) = builder.clone(url, into) {
+        // Fallback to git CLI if git2 fails (e.g. TLS stream error)
+        tracing::warn!("git2 clone failed ({}). Falling back to git CLI.", e);
+        let mut cmd = std::process::Command::new("git");
+        cmd.args(["clone", "--depth", "1"]);
+        if let Some(b) = branch {
+            cmd.args(["-b", b]);
+        }
+        let status = cmd.arg(url)
+            .arg(into.to_str().unwrap())
+            .status()
+            .map_err(|io_err| git2::Error::from_str(&format!("git CLI fallback failed: {}", io_err)))?;
+            
+        if !status.success() {
+            return Err(git2::Error::from_str("git CLI clone failed"));
+        }
+    }
+    
     Ok(())
 }

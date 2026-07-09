@@ -95,7 +95,7 @@ fn extract_python_function(
     let end = node.end_position();
     let sig = build_python_signature(source, node);
 
-    Some(Symbol {
+    Some(Symbol { id: None,
         name,
         kind: if inside_class {
             SymbolKind::Method
@@ -117,7 +117,7 @@ fn extract_python_class(source: &[u8], node: Node<'_>, file_path: &str) -> Optio
     let end = node.end_position();
     let first_line = source_line(source, start.row);
 
-    Some(Symbol {
+    Some(Symbol { id: None,
         name,
         kind: SymbolKind::Class,
         file_path: file_path.to_string(),

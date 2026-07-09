@@ -53,6 +53,7 @@ impl std::str::FromStr for SymbolKind {
 /// A code symbol extracted from a source file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Symbol {
+    pub id: Option<i64>,
     pub name: String,
     pub kind: SymbolKind,
     /// Path relative to the repo root.

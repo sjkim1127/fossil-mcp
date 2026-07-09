@@ -2,8 +2,10 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, params};
-use tracing::debug;
+use rusqlite::{Connection, params, ffi::sqlite3_auto_extension};
+use sqlite_vec::sqlite3_vec_init;
+use tracing::{debug, warn};
+use std::sync::Once;
 
 use crate::error::StorageError;
 use crate::types::{CallEdge, RepoMeta, Symbol, SymbolKind};
@@ -18,7 +20,17 @@ pub struct RepoStore {
 impl RepoStore {
     /// Open (or create) the index database at `db_path`.
     pub fn open(db_path: &Path) -> Result<Self, StorageError> {
+        // Register the sqlite-vec extension globally for all connections (once).
+        static INIT_VEC: Once = Once::new();
+        INIT_VEC.call_once(|| {
+            unsafe {
+                sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
+            }
+        });
+
         let conn = Connection::open(db_path)?;
+        // vec0 requires loading it if auto_extension doesn't immediately apply to the very first connection sometimes, but auto_extension applies to newly opened connections.
+        
         let store = Self { conn };
         store.init_schema()?;
         Ok(store)
@@ -64,6 +76,13 @@ impl RepoStore {
 
             CREATE INDEX IF NOT EXISTS idx_call_edges_caller ON call_edges(caller);
             CREATE INDEX IF NOT EXISTS idx_call_edges_callee ON call_edges(callee);
+            CREATE INDEX IF NOT EXISTS idx_call_edges_callee ON call_edges(callee);
+
+            -- Vector table for semantic search. We use 384 dimensions for BGE-small-en-v1.5
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_symbols USING vec0(
+                symbol_id INTEGER PRIMARY KEY,
+                embedding float[384]
+            );
             ",
         )?;
         Ok(())
@@ -177,7 +196,11 @@ impl RepoStore {
 
     /// Remove all symbols previously stored (used before re-indexing).
     pub fn clear_symbols(&self) -> Result<(), StorageError> {
-        self.conn.execute_batch("DELETE FROM symbols; DELETE FROM call_edges;")?;
+        self.conn.execute_batch("
+            DELETE FROM symbols;
+            DELETE FROM call_edges;
+            DELETE FROM vec_symbols;
+        ")?;
         Ok(())
     }
 
@@ -209,33 +232,35 @@ impl RepoStore {
     /// Load all symbols for a repository.
     pub fn load_symbols(&self) -> Result<Vec<Symbol>, StorageError> {
         let mut stmt = self.conn.prepare(
-            "SELECT name, kind, file_path, line_start, line_end, signature, language FROM symbols",
+            "SELECT id, name, kind, file_path, line_start, line_end, signature, language FROM symbols",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
-                row.get::<_, String>(0)?,
+                row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
-                row.get::<_, u32>(3)?,
+                row.get::<_, String>(3)?,
                 row.get::<_, u32>(4)?,
-                row.get::<_, String>(5)?,
+                row.get::<_, u32>(5)?,
                 row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
             ))
         })?;
 
         let mut result = Vec::new();
         for row in rows {
             let r = row?;
-            let kind = SymbolKind::from_str(&r.1)
+            let kind = SymbolKind::from_str(&r.2)
                 .unwrap_or(SymbolKind::Function);
             result.push(Symbol {
-                name: r.0,
+                id: Some(r.0),
+                name: r.1,
                 kind,
-                file_path: r.2,
-                line_start: r.3,
-                line_end: r.4,
-                signature: r.5,
-                language: r.6,
+                file_path: r.3,
+                line_start: r.4,
+                line_end: r.5,
+                signature: r.6,
+                language: r.7,
             });
         }
         Ok(result)
@@ -303,6 +328,53 @@ impl RepoStore {
             params![count as i64, indexed_at.to_rfc3339(), repo_id],
         )?;
         Ok(())
+    }
+
+    /// Insert vector embeddings for semantic search.
+    /// Returns the number of inserted vectors.
+    pub fn insert_embeddings(&self, embeddings: &[(i64, Vec<f32>)]) -> Result<usize, StorageError> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut count = 0;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO vec_symbols (symbol_id, embedding) VALUES (?1, ?2)",
+            )?;
+            for (id, vec) in embeddings {
+                let bytes: &[u8] = bytemuck::cast_slice(vec.as_slice());
+                stmt.execute(params![id, bytes])?;
+                count += 1;
+            }
+        }
+        tx.commit()?;
+        debug!("Inserted {} vector embeddings", count);
+        Ok(count)
+    }
+
+    /// Perform a vector search using KNN (K-Nearest Neighbors).
+    /// Returns a list of symbol_ids and their distance (smaller is closer).
+    pub fn search_embeddings(&self, query_embedding: &[f32], limit: usize) -> Result<Vec<(i64, f64)>, StorageError> {
+        let mut stmt = self.conn.prepare(
+            "
+            SELECT symbol_id, distance
+            FROM vec_symbols
+            WHERE embedding MATCH ?1
+            ORDER BY distance
+            LIMIT ?2
+            "
+        )?;
+        let bytes: &[u8] = bytemuck::cast_slice(query_embedding);
+        let rows = stmt.query_map(params![bytes, limit as i64], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, f64>(1)?,
+            ))
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
     }
 }
 

@@ -110,7 +110,7 @@ fn extract_ts_function(
     let end = node.end_position();
     let sig = build_ts_signature(source, node);
 
-    Some(Symbol {
+    Some(Symbol { id: None,
         name,
         kind: if inside_class {
             SymbolKind::Method
@@ -137,7 +137,7 @@ fn extract_ts_named(
     let end = node.end_position();
     let first_line = source_line(source, start.row);
 
-    Some(Symbol {
+    Some(Symbol { id: None,
         name,
         kind,
         file_path: file_path.to_string(),
@@ -162,7 +162,7 @@ fn extract_arrow_fn(source: &[u8], declarator: Node<'_>, file_path: &str) -> Opt
         .next()
         .unwrap_or(""));
 
-    Some(Symbol {
+    Some(Symbol { id: None,
         name,
         kind: SymbolKind::Function,
         file_path: file_path.to_string(),

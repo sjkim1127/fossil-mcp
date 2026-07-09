@@ -14,7 +14,7 @@ use tracing::{debug, info};
 use fossil_core::storage::{RepoStore, index_db_path};
 use fossil_indexer::{index_directory, languages::default_registry};
 use fossil_repo::{cache::CacheManager, clone::CloneOptions};
-use fossil_search::{FuzzySearcher, traits::Searcher};
+use fossil_search::{FuzzySearcher, semantic::SemanticSearcher, traits::Searcher};
 
 // ── Input types ───────────────────────────────────────────────────────────────
 
@@ -58,6 +58,14 @@ pub struct GetSymbolSourceInput {
     pub line_start: u32,
     #[schemars(description = "Last line of the symbol (1-indexed, inclusive)")]
     pub line_end: u32,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AnalyzeFeatureInput {
+    #[schemars(description = "Public git repository URL to clone and analyze")]
+    pub repo_url: String,
+    #[schemars(description = "Natural language or keyword query describing the feature (e.g. 'OAuth token refresh')")]
+    pub query: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -160,6 +168,31 @@ impl FossilServer {
             let store = RepoStore::open(&db_path).map_err(|e| e.to_string())?;
             store.clear_symbols().map_err(|e| e.to_string())?;
             store.insert_symbols(&symbols).map_err(|e| e.to_string())?;
+            
+            // Retrieve inserted symbols so we have their generated IDs for embedding
+            let stored_symbols = store.load_symbols().map_err(|e| e.to_string())?;
+            
+            // Generate embeddings in chunks of 500 to avoid memory spikes
+            let mut embedding_count = 0;
+            for chunk in stored_symbols.chunks(500) {
+                let texts: Vec<String> = chunk
+                    .iter()
+                    .map(|s| format!("{} {} {}", s.language, s.kind, s.signature))
+                    .collect();
+                
+                let embeddings = SemanticSearcher::generate_embeddings(texts)
+                    .map_err(|e| e.to_string())?;
+                
+                let insert_batch: Vec<(i64, Vec<f32>)> = chunk
+                    .iter()
+                    .zip(embeddings.into_iter())
+                    .map(|(s, vec)| (s.id.unwrap_or(0), vec))
+                    .collect();
+                
+                embedding_count += store.insert_embeddings(&insert_batch).map_err(|e| e.to_string())?;
+            }
+            info!("Generated and inserted {} embeddings", embedding_count);
+
             store
                 .insert_call_edges(&call_edges)
                 .map_err(|e| e.to_string())?;
@@ -209,13 +242,32 @@ impl FossilServer {
                     repo_id
                 ));
             }
+            
+            // Try Semantic Search first
+            let mut search_results = Vec::new();
+            if let Ok(mut query_embeds) = SemanticSearcher::generate_embeddings(vec![query.clone()]) {
+                if let Some(query_embed) = query_embeds.pop() {
+                    if let Ok(vec_results) = store.search_embeddings(&query_embed, top_k) {
+                        for (sym_id, distance) in vec_results {
+                            if let Some(sym) = symbols.iter().find(|s| s.id == Some(sym_id)) {
+                                search_results.push((sym.clone(), distance));
+                            }
+                        }
+                    }
+                }
+            }
 
-            let results = FuzzySearcher.search(&query, &symbols, top_k);
+            // Fallback to fuzzy search if semantic search yields nothing
+            if search_results.is_empty() {
+                let results = FuzzySearcher.search(&query, &symbols, top_k);
+                for res in results {
+                    search_results.push((res.symbol, res.score));
+                }
+            }
 
-            let matches: Vec<serde_json::Value> = results
+            let matches: Vec<serde_json::Value> = search_results
                 .iter()
-                .map(|sr| {
-                    let sym = &sr.symbol;
+                .map(|(sym, score)| {
 
                     // Fetch 1-hop related symbols from call edges.
                     let mut related = Vec::new();
@@ -248,7 +300,7 @@ impl FossilServer {
                         "line_start": sym.line_start,
                         "line_end": sym.line_end,
                         "signature": sym.signature,
-                        "score": sr.score,
+                        "score": score,
                         "related_symbols": related,
                     })
                 })
@@ -356,6 +408,45 @@ impl FossilServer {
 
         Ok(result.to_string())
     }
+
+    // ── analyze_feature ──────────────────────────────────────────────────────
+
+    #[tool(description = "High-level tool that orchestrates cloning, indexing, and searching in one step. Ideal for one-shot feature analysis.")]
+    async fn analyze_feature(
+        &self,
+        Parameters(input): Parameters<AnalyzeFeatureInput>,
+    ) -> Result<String, McpError> {
+        info!("analyze_feature: url={} query={:?}", input.repo_url, input.query);
+
+        // 1. Clone
+        let clone_result = self.clone_reference(Parameters(CloneReferenceInput {
+            repo_url: input.repo_url,
+            alias: None,
+            branch: None,
+            refresh: None,
+        })).await?;
+        
+        let clone_data: serde_json::Value = serde_json::from_str(&clone_result)
+            .map_err(|e| McpError::internal_error(format!("Failed to parse clone result: {}", e), None))?;
+        
+        let repo_id = clone_data["repo_id"].as_str().unwrap().to_string();
+        let indexed = clone_data["indexed"].as_bool().unwrap_or(false);
+
+        // 2. Index (if not already indexed)
+        if !indexed {
+            self.index_repo(Parameters(IndexRepoInput {
+                repo_id: repo_id.clone(),
+                languages: None,
+            })).await?;
+        }
+
+        // 3. Locate
+        self.locate_implementation(Parameters(LocateImplementationInput {
+            repo_id,
+            query: input.query,
+            top_k: Some(10), // Give a generous top_k for broad feature analysis
+        })).await
+    }
 }
 
 #[tool_handler(
@@ -364,3 +455,23 @@ impl FossilServer {
     instructions = "fossil-mcp locates exact implementations inside open-source repos. Workflow: 1) clone_reference to clone a repo, 2) index_repo to parse symbols, 3) locate_implementation to search."
 )]
 impl ServerHandler for FossilServer {}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_analyze_feature_integration() {
+        let server = FossilServer::new();
+        let res = server.analyze_feature(Parameters(AnalyzeFeatureInput {
+            repo_url: "https://github.com/dtolnay/itoa".to_string(),
+            query: "write integer to string".to_string(),
+        })).await.unwrap();
+        
+        println!("Result: {}", res);
+        
+        let val: serde_json::Value = serde_json::from_str(&res).unwrap();
+        assert!(val["matches"].as_array().unwrap().len() > 0);
+    }
+}

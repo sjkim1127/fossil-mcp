@@ -110,7 +110,7 @@ fn extract_function(
     let start = node.start_position();
     let end = node.end_position();
 
-    Some(Symbol {
+    Some(Symbol { id: None,
         name,
         kind,
         file_path: file_path.to_string(),
@@ -134,7 +134,7 @@ fn extract_named_item(
     // For structs/enums/traits the signature is the first line.
     let first_line = source_line(source, start.row);
 
-    Some(Symbol {
+    Some(Symbol { id: None,
         name,
         kind,
         file_path: file_path.to_string(),

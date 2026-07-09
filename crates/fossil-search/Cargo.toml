@@ -7,6 +7,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-fossil-core.workspace = true
-nucleo-matcher.workspace = true
+# Dependencies
+nucleo-matcher = { workspace = true }
+fastembed.workspace = true
+fossil-core = { workspace = true }
 thiserror.workspace = true
