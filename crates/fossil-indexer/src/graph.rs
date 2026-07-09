@@ -43,13 +43,13 @@ impl CallGraph {
                 .entry(edge.callee.clone())
                 .or_default()
                 .push(edge.clone());
-            by_caller
-                .entry(edge.caller.clone())
-                .or_default()
-                .push(edge);
+            by_caller.entry(edge.caller.clone()).or_default().push(edge);
         }
 
-        Self { by_caller, by_callee }
+        Self {
+            by_caller,
+            by_callee,
+        }
     }
 
     /// Return 1-hop related symbols: what `symbol_name` calls + what calls it.
@@ -90,9 +90,10 @@ mod tests {
 
     fn edge(caller: &str, callee: &str) -> CallEdge {
         CallEdge {
+            repo_id: String::new(),
             caller: caller.to_string(),
             callee: callee.to_string(),
-            file_path: "src/lib.rs".to_string(),
+            file_path: "".to_string(),
             line: 1,
         }
     }

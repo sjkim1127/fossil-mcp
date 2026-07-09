@@ -1,6 +1,6 @@
 use nucleo_matcher::{
-    pattern::{CaseMatching, Normalization, Pattern},
     Config, Matcher, Utf32Str,
+    pattern::{CaseMatching, Normalization, Pattern},
 };
 
 use fossil_core::types::Symbol;
@@ -60,6 +60,8 @@ mod tests {
 
     fn make_sym(name: &str, sig: &str) -> Symbol {
         Symbol {
+            id: None,
+            repo_id: String::new(),
             name: name.to_string(),
             kind: SymbolKind::Function,
             file_path: "lib.rs".to_string(),
@@ -73,7 +75,10 @@ mod tests {
     #[test]
     fn finds_best_match() {
         let symbols = vec![
-            make_sym("refresh_token", "pub fn refresh_token(token: &str) -> Token"),
+            make_sym(
+                "refresh_token",
+                "pub fn refresh_token(token: &str) -> Token",
+            ),
             make_sym("get_user", "pub fn get_user(id: u32) -> User"),
             make_sym("delete_token", "pub fn delete_token(token: &str)"),
         ];
@@ -91,7 +96,9 @@ mod tests {
 
     #[test]
     fn top_k_is_respected() {
-        let symbols: Vec<_> = (0..20).map(|i| make_sym(&format!("fn_{}", i), "")).collect();
+        let symbols: Vec<_> = (0..20)
+            .map(|i| make_sym(&format!("fn_{}", i), ""))
+            .collect();
         let results = FuzzySearcher.search("fn", &symbols, 5);
         assert!(results.len() <= 5);
     }

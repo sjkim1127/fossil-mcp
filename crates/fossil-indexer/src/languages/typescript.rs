@@ -110,7 +110,9 @@ fn extract_ts_function(
     let end = node.end_position();
     let sig = build_ts_signature(source, node);
 
-    Some(Symbol { id: None,
+    Some(Symbol {
+        id: None,
+        repo_id: String::new(),
         name,
         kind: if inside_class {
             SymbolKind::Method
@@ -137,7 +139,9 @@ fn extract_ts_named(
     let end = node.end_position();
     let first_line = source_line(source, start.row);
 
-    Some(Symbol { id: None,
+    Some(Symbol {
+        id: None,
+        repo_id: String::new(),
         name,
         kind,
         file_path: file_path.to_string(),
@@ -157,12 +161,15 @@ fn extract_arrow_fn(source: &[u8], declarator: Node<'_>, file_path: &str) -> Opt
     let name = node_text(source, name_node);
     let start = declarator.start_position();
     let end = declarator.end_position();
-    let sig = format!("const {} = {}", name, node_text(source, value_node)
-        .lines()
-        .next()
-        .unwrap_or(""));
+    let sig = format!(
+        "const {} = {}",
+        name,
+        node_text(source, value_node).lines().next().unwrap_or("")
+    );
 
-    Some(Symbol { id: None,
+    Some(Symbol {
+        id: None,
+        repo_id: String::new(),
         name,
         kind: SymbolKind::Function,
         file_path: file_path.to_string(),
@@ -184,7 +191,11 @@ fn build_ts_signature(source: &[u8], fn_node: Node<'_>) -> String {
             parts.push(text);
         }
     }
-    parts.join(" ").split_whitespace().collect::<Vec<_>>().join(" ")
+    parts
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 // ── Call edge extraction ─────────────────────────────────────────────────────
@@ -212,6 +223,7 @@ fn collect_ts_calls(
         if let Some(callee) = extract_ts_callee(source, node) {
             if let Some(c) = caller {
                 out.push(CallEdge {
+                    repo_id: String::new(),
                     caller: c.to_string(),
                     callee,
                     file_path: file_path.to_string(),
@@ -230,11 +242,9 @@ fn extract_ts_callee(source: &[u8], call_node: Node<'_>) -> Option<String> {
     let fn_node = call_node.child_by_field_name("function")?;
     match fn_node.kind() {
         "identifier" => Some(node_text(source, fn_node)),
-        "member_expression" => {
-            fn_node
-                .child_by_field_name("property")
-                .map(|n| node_text(source, n))
-        }
+        "member_expression" => fn_node
+            .child_by_field_name("property")
+            .map(|n| node_text(source, n)),
         _ => None,
     }
 }
@@ -263,7 +273,9 @@ mod tests {
 
     fn parse(src: &str) -> Tree {
         let mut parser = TsParser::new();
-        parser.set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+            .unwrap();
         parser.parse(src, None).unwrap()
     }
 
@@ -291,7 +303,11 @@ class Greeter {
         let src = "interface Repo { id: string; }";
         let tree = parse(src);
         let symbols = TypeScriptParser.parse_symbols(src.as_bytes(), &tree, "test.ts");
-        assert!(symbols.iter().any(|s| s.name == "Repo" && s.kind == SymbolKind::Interface));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Repo" && s.kind == SymbolKind::Interface)
+        );
     }
 
     #[test]

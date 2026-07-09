@@ -1,9 +1,9 @@
-pub mod rust;
 pub mod python;
+pub mod rust;
 pub mod typescript;
 
-pub use rust::RustParser;
 pub use python::PythonParser;
+pub use rust::RustParser;
 pub use typescript::TypeScriptParser;
 
 use crate::parser::ParserRegistry;

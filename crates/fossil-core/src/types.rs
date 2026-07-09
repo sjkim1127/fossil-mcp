@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// The kind of a code symbol.
@@ -54,6 +54,7 @@ impl std::str::FromStr for SymbolKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Symbol {
     pub id: Option<i64>,
+    pub repo_id: String,
     pub name: String,
     pub kind: SymbolKind,
     /// Path relative to the repo root.
@@ -69,6 +70,7 @@ pub struct Symbol {
 /// A directed call edge between two symbols.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallEdge {
+    pub repo_id: String,
     /// Name of the calling symbol.
     pub caller: String,
     /// Name of the callee symbol.
@@ -88,6 +90,7 @@ pub struct RepoMeta {
     pub alias: Option<String>,
     pub path: PathBuf,
     pub indexed_at: Option<DateTime<Utc>>,
+    pub last_accessed_at: Option<DateTime<Utc>>,
     pub symbol_count: u64,
 }
 

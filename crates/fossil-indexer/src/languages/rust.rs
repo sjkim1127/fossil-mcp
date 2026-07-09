@@ -110,7 +110,9 @@ fn extract_function(
     let start = node.start_position();
     let end = node.end_position();
 
-    Some(Symbol { id: None,
+    Some(Symbol {
+        id: None,
+        repo_id: String::new(),
         name,
         kind,
         file_path: file_path.to_string(),
@@ -134,7 +136,9 @@ fn extract_named_item(
     // For structs/enums/traits the signature is the first line.
     let first_line = source_line(source, start.row);
 
-    Some(Symbol { id: None,
+    Some(Symbol {
+        id: None,
+        repo_id: String::new(),
         name,
         kind,
         file_path: file_path.to_string(),
@@ -166,7 +170,11 @@ fn build_function_signature(source: &[u8], fn_node: Node<'_>) -> String {
             parts.push(text);
         }
     }
-    parts.join(" ").split_whitespace().collect::<Vec<_>>().join(" ")
+    parts
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 // ── Call edge extraction ─────────────────────────────────────────────────────
@@ -194,6 +202,7 @@ fn collect_rust_calls(
         if let Some(callee_name) = extract_call_callee(source, node) {
             if let Some(c) = caller {
                 out.push(CallEdge {
+                    repo_id: String::new(),
                     caller: c.to_string(),
                     callee: callee_name,
                     file_path: file_path.to_string(),
@@ -216,12 +225,10 @@ fn extract_call_callee(source: &[u8], call_node: Node<'_>) -> Option<String> {
         // Simple call: `foo()`
         "identifier" => Some(node_text(source, fn_node)),
         // Method call: `self.foo()` or scoped: `Foo::bar()`
-        "field_expression" | "scoped_identifier" => {
-            fn_node
-                .child_by_field_name("field")
-                .or_else(|| fn_node.child_by_field_name("name"))
-                .map(|n| node_text(source, n))
-        }
+        "field_expression" | "scoped_identifier" => fn_node
+            .child_by_field_name("field")
+            .or_else(|| fn_node.child_by_field_name("name"))
+            .map(|n| node_text(source, n)),
         _ => None,
     }
 }
@@ -246,7 +253,9 @@ mod tests {
 
     fn parse(src: &str) -> Tree {
         let mut parser = TsParser::new();
-        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
+            .unwrap();
         parser.parse(src, None).unwrap()
     }
 
@@ -272,7 +281,11 @@ fn private() {}
         let src = "pub struct Foo { x: i32 }";
         let tree = parse(src);
         let symbols = RustParser.parse_symbols(src.as_bytes(), &tree, "test.rs");
-        assert!(symbols.iter().any(|s| s.name == "Foo" && s.kind == SymbolKind::Struct));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Foo" && s.kind == SymbolKind::Struct)
+        );
     }
 
     #[test]
@@ -280,7 +293,11 @@ fn private() {}
         let src = "pub trait Bar { fn baz(&self); }";
         let tree = parse(src);
         let symbols = RustParser.parse_symbols(src.as_bytes(), &tree, "test.rs");
-        assert!(symbols.iter().any(|s| s.name == "Bar" && s.kind == SymbolKind::Trait));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Bar" && s.kind == SymbolKind::Trait)
+        );
     }
 
     #[test]

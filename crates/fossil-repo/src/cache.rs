@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
 
-use fossil_core::storage::{RepoStore, cache_root, index_db_path};
+use fossil_core::storage::{GlobalStore, cache_root, global_db_path};
 use fossil_core::types::RepoMeta;
 
 use crate::error::RepoError;
@@ -44,42 +44,98 @@ impl CacheManager {
         Ok(())
     }
 
-    /// Open (or create) the SQLite index for this repo.
-    pub fn open_store(repo_id: &str) -> Result<RepoStore, RepoError> {
-        let db_path = index_db_path(&Self::repo_dir(repo_id));
-        let store = RepoStore::open(&db_path)?;
+    /// Open (or create) the global SQLite index store.
+    pub fn global_store() -> Result<GlobalStore, RepoError> {
+        Self::ensure_root()?;
+        let db_path = global_db_path();
+        let store = GlobalStore::open(&db_path)?;
         Ok(store)
     }
 
     /// Return metadata for every cached (and indexed) repo.
     pub fn list_all() -> Result<Vec<RepoMeta>, RepoError> {
+        let store = Self::global_store()?;
+        store.list_repos().map_err(|e| RepoError::Storage(e.into()))
+    }
+
+    /// Recursively calculates the size of a directory.
+    fn get_dir_size(path: &std::path::Path) -> std::io::Result<u64> {
+        let mut size = 0;
+        if path.is_dir() {
+            for entry in std::fs::read_dir(path)? {
+                let entry = entry?;
+                let metadata = entry.metadata()?;
+                if metadata.is_dir() {
+                    size += Self::get_dir_size(&entry.path())?;
+                } else {
+                    size += metadata.len();
+                }
+            }
+        } else {
+            size += path.metadata()?.len();
+        }
+        Ok(size)
+    }
+
+    /// Enforces the capacity limit on the cache by evicting the oldest accessed repositories.
+    pub fn enforce_capacity(store: &GlobalStore, max_bytes: u64) -> Result<(), RepoError> {
         let root = cache_root();
         if !root.exists() {
-            return Ok(vec![]);
+            return Ok(());
         }
 
-        let mut result = Vec::new();
-        for entry in std::fs::read_dir(root)? {
-            let entry = entry?;
-            if !entry.file_type()?.is_dir() {
-                continue;
+        loop {
+            let current_size = Self::get_dir_size(&root).unwrap_or(0);
+            if current_size <= max_bytes {
+                break;
             }
-            let db_path = index_db_path(&entry.path());
-            if !db_path.exists() {
-                continue;
+
+            let mut repos = store
+                .list_repos()
+                .map_err(|e| RepoError::Storage(e.into()))?;
+            if repos.is_empty() {
+                break; // Nothing left to evict
             }
-            match RepoStore::open(&db_path) {
-                Ok(store) => {
-                    let repo_id = entry.file_name().to_string_lossy().to_string();
-                    match store.get_repo(&repo_id) {
-                        Ok(meta) => result.push(meta),
-                        Err(_) => {} // DB exists but no repo row yet — skip
-                    }
+
+            // Sort by last_accessed_at (oldest first).
+            // Repos without a last_accessed_at are considered oldest (e.g. legacy repos)
+            repos.sort_by(|a, b| match (a.last_accessed_at, b.last_accessed_at) {
+                (Some(a_time), Some(b_time)) => a_time.cmp(&b_time),
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            });
+
+            let oldest_repo = &repos[0];
+            tracing::info!(
+                "Cache size {} exceeds limit {}. Evicting repo '{}' ({})",
+                current_size,
+                max_bytes,
+                oldest_repo.url,
+                oldest_repo.repo_id
+            );
+
+            // 1. Delete from DB
+            if let Err(e) = store.evict_repo(&oldest_repo.repo_id) {
+                tracing::warn!(
+                    "Failed to evict repo {} from DB: {}",
+                    oldest_repo.repo_id,
+                    e
+                );
+            }
+
+            // 2. Delete physical clone dir
+            let repo_dir = Self::repo_dir(&oldest_repo.repo_id);
+            if repo_dir.exists() {
+                if let Err(e) = std::fs::remove_dir_all(&repo_dir) {
+                    tracing::warn!("Failed to remove directory {:?}: {}", repo_dir, e);
                 }
-                Err(_) => {} // corrupted DB — skip
             }
+
+            // Re-calculate on next loop iteration until under max_bytes
         }
-        Ok(result)
+
+        Ok(())
     }
 }
 

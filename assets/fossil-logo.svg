@@ -1,0 +1,24 @@
+<svg width="960" height="280" viewBox="0 0 960 280" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">fossil-mcp logo</title>
+  <desc id="desc">A restrained mark showing layered repository strata and a search path, paired with the fossil-mcp wordmark.</desc>
+  <rect width="960" height="280" rx="28" fill="#F8FAFC"/>
+  <rect x="28" y="28" width="904" height="224" rx="24" fill="#FFFFFF" stroke="#D8DEE9"/>
+  <g transform="translate(76 56)">
+    <rect x="0" y="0" width="168" height="168" rx="28" fill="#102033"/>
+    <path d="M32 118C54 102 76 102 98 118C116 131 133 132 148 121" stroke="#8DD3C7" stroke-width="10" stroke-linecap="round"/>
+    <path d="M30 84C53 70 78 70 101 84C119 95 135 96 151 87" stroke="#F2C56B" stroke-width="10" stroke-linecap="round"/>
+    <path d="M32 51C54 39 78 39 100 51C119 61 135 62 149 54" stroke="#E7EDF5" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="93" cy="86" r="22" fill="#102033" stroke="#E7EDF5" stroke-width="9"/>
+    <path d="M109 102L131 124" stroke="#E7EDF5" stroke-width="9" stroke-linecap="round"/>
+  </g>
+  <g transform="translate(284 79)">
+    <text x="0" y="56" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="54" font-weight="760" fill="#102033">fossil-mcp</text>
+    <text x="2" y="101" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="22" font-weight="520" fill="#526173">Implementation search for open-source repositories</text>
+    <rect x="2" y="130" width="142" height="30" rx="15" fill="#E7F6F3"/>
+    <text x="20" y="151" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="650" fill="#17685E">MCP server</text>
+    <rect x="158" y="130" width="148" height="30" rx="15" fill="#FFF5DF"/>
+    <text x="176" y="151" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="650" fill="#80601E">Rust indexer</text>
+    <rect x="320" y="130" width="155" height="30" rx="15" fill="#EEF3FA"/>
+    <text x="338" y="151" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="650" fill="#344B66">SQLite cache</text>
+  </g>
+</svg>

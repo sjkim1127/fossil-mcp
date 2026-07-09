@@ -16,3 +16,5 @@ rayon.workspace = true
 walkdir.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+scip = "0.9.0"
+protobuf = "3.7.2"

@@ -16,6 +16,7 @@ use crate::parser::ParserRegistry;
 /// Files are processed in parallel via Rayon; results are merged afterward.
 pub fn index_directory(
     repo_dir: &Path,
+    repo_id: &str,
     registry: &ParserRegistry,
 ) -> Result<(Vec<Symbol>, Vec<CallEdge>), IndexError> {
     // Collect all source files first (single-threaded walk is fast enough).
@@ -41,7 +42,7 @@ pub fn index_directory(
     // Parallel parse.
     let results: Vec<Result<(Vec<Symbol>, Vec<CallEdge>), IndexError>> = files
         .par_iter()
-        .map(|path| parse_file(path, repo_dir, registry))
+        .map(|path| parse_file(path, repo_dir, repo_id, registry))
         .collect();
 
     let mut all_symbols = Vec::new();
@@ -72,12 +73,10 @@ pub fn index_directory(
 fn parse_file(
     path: &Path,
     repo_dir: &Path,
+    repo_id: &str,
     registry: &ParserRegistry,
 ) -> Result<(Vec<Symbol>, Vec<CallEdge>), IndexError> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     let lang_parser = registry
         .for_extension(ext)
@@ -86,17 +85,19 @@ fn parse_file(
     let source = std::fs::read(path)?;
 
     let mut ts_parser = TsParser::new();
-    ts_parser.set_language(&lang_parser.ts_language()).map_err(|e| {
-        IndexError::ParseFailed {
+    ts_parser
+        .set_language(&lang_parser.ts_language())
+        .map_err(|e| IndexError::ParseFailed {
             file: path.display().to_string(),
             message: e.to_string(),
-        }
-    })?;
+        })?;
 
-    let tree = ts_parser.parse(&source, None).ok_or_else(|| IndexError::ParseFailed {
-        file: path.display().to_string(),
-        message: "tree-sitter returned None".to_string(),
-    })?;
+    let tree = ts_parser
+        .parse(&source, None)
+        .ok_or_else(|| IndexError::ParseFailed {
+            file: path.display().to_string(),
+            message: "tree-sitter returned None".to_string(),
+        })?;
 
     // Use a repo-root-relative path in all output.
     let rel_path = path
@@ -105,8 +106,15 @@ fn parse_file(
         .to_string_lossy()
         .to_string();
 
-    let symbols = lang_parser.parse_symbols(&source, &tree, &rel_path);
-    let edges = lang_parser.extract_calls(&source, &tree, &rel_path);
+    let mut symbols = lang_parser.parse_symbols(&source, &tree, &rel_path);
+    let mut edges = lang_parser.extract_calls(&source, &tree, &rel_path);
+
+    for sym in &mut symbols {
+        sym.repo_id = repo_id.to_string();
+    }
+    for edge in &mut edges {
+        edge.repo_id = repo_id.to_string();
+    }
 
     Ok((symbols, edges))
 }

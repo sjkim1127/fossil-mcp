@@ -69,7 +69,10 @@ fn collect_python_symbols(
         "decorated_definition" => {
             // Walk through decorators to the underlying function/class.
             for child in node.children(&mut node.walk()) {
-                if matches!(child.kind(), "function_definition" | "class_definition" | "async_function_def") {
+                if matches!(
+                    child.kind(),
+                    "function_definition" | "class_definition" | "async_function_def"
+                ) {
                     collect_python_symbols(source, child, file_path, inside_class, out);
                 }
             }
@@ -95,7 +98,9 @@ fn extract_python_function(
     let end = node.end_position();
     let sig = build_python_signature(source, node);
 
-    Some(Symbol { id: None,
+    Some(Symbol {
+        id: None,
+        repo_id: String::new(),
         name,
         kind: if inside_class {
             SymbolKind::Method
@@ -117,7 +122,9 @@ fn extract_python_class(source: &[u8], node: Node<'_>, file_path: &str) -> Optio
     let end = node.end_position();
     let first_line = source_line(source, start.row);
 
-    Some(Symbol { id: None,
+    Some(Symbol {
+        id: None,
+        repo_id: String::new(),
         name,
         kind: SymbolKind::Class,
         file_path: file_path.to_string(),
@@ -140,7 +147,11 @@ fn build_python_signature(source: &[u8], fn_node: Node<'_>) -> String {
             parts.push(text);
         }
     }
-    parts.join(" ").split_whitespace().collect::<Vec<_>>().join(" ")
+    parts
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 // ── Call edge extraction ─────────────────────────────────────────────────────
@@ -154,12 +165,13 @@ fn collect_python_calls(
 ) {
     let node_kind = node.kind();
 
-    let fn_name: Option<String> = if matches!(node_kind, "function_definition" | "async_function_def") {
-        node.child_by_field_name("name")
-            .map(|n| node_text(source, n))
-    } else {
-        None
-    };
+    let fn_name: Option<String> =
+        if matches!(node_kind, "function_definition" | "async_function_def") {
+            node.child_by_field_name("name")
+                .map(|n| node_text(source, n))
+        } else {
+            None
+        };
 
     let caller = fn_name.as_deref().or(current_fn);
 
@@ -167,6 +179,7 @@ fn collect_python_calls(
         if let Some(callee) = extract_python_callee(source, node) {
             if let Some(c) = caller {
                 out.push(CallEdge {
+                    repo_id: String::new(),
                     caller: c.to_string(),
                     callee,
                     file_path: file_path.to_string(),
@@ -185,11 +198,9 @@ fn extract_python_callee(source: &[u8], call_node: Node<'_>) -> Option<String> {
     let fn_node = call_node.child_by_field_name("function")?;
     match fn_node.kind() {
         "identifier" => Some(node_text(source, fn_node)),
-        "attribute" => {
-            fn_node
-                .child_by_field_name("attribute")
-                .map(|n| node_text(source, n))
-        }
+        "attribute" => fn_node
+            .child_by_field_name("attribute")
+            .map(|n| node_text(source, n)),
         _ => None,
     }
 }
@@ -218,7 +229,9 @@ mod tests {
 
     fn parse(src: &str) -> Tree {
         let mut parser = TsParser::new();
-        parser.set_language(&tree_sitter_python::LANGUAGE.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_python::LANGUAGE.into())
+            .unwrap();
         parser.parse(src, None).unwrap()
     }
 

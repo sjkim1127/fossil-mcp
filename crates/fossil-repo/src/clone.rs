@@ -3,6 +3,7 @@ use std::path::Path;
 use git2::FetchOptions;
 use tracing::{debug, info};
 
+use chrono::Utc;
 use fossil_core::types::RepoMeta;
 
 use crate::cache::{CacheManager, repo_id_from_url};
@@ -36,18 +37,19 @@ pub fn clone_repo(opts: CloneOptions<'_>) -> Result<RepoMeta, RepoError> {
     // Reuse existing clone.
     if repo_dir.exists() {
         debug!("Cache hit for repo_id={} at {:?}", repo_id, repo_dir);
-        let store = CacheManager::open_store(&repo_id)?;
+        let store = CacheManager::global_store()?;
         return store
             .get_repo(&repo_id)
             .map_err(|e| RepoError::Storage(e.into()))
             .or_else(|_| {
                 // DB exists but no row yet — synthesise metadata.
                 Ok(RepoMeta {
-                    repo_id: repo_id.clone(),
+                    repo_id: repo_id.to_string(),
                     url: opts.url.to_string(),
                     alias: opts.alias.clone(),
-                    path: repo_dir.clone(),
+                    path: repo_dir,
                     indexed_at: None,
+                    last_accessed_at: Some(Utc::now()),
                     symbol_count: 0,
                 })
             });
@@ -70,16 +72,17 @@ pub fn clone_repo(opts: CloneOptions<'_>) -> Result<RepoMeta, RepoError> {
     })?;
 
     let meta = RepoMeta {
-        repo_id: repo_id.clone(),
+        repo_id: repo_id.to_string(),
         url: opts.url.to_string(),
         alias: opts.alias,
         path: repo_dir,
         indexed_at: None,
+        last_accessed_at: Some(Utc::now()),
         symbol_count: 0,
     };
 
-    // Persist metadata to the repo's SQLite DB.
-    let store = CacheManager::open_store(&repo_id)?;
+    // Persist metadata to the global SQLite DB.
+    let store = CacheManager::global_store()?;
     store
         .upsert_repo(&meta)
         .map_err(|e| RepoError::Storage(e))?;
@@ -109,15 +112,18 @@ fn do_shallow_clone(url: &str, branch: Option<&str>, into: &Path) -> Result<(), 
         if let Some(b) = branch {
             cmd.args(["-b", b]);
         }
-        let status = cmd.arg(url)
+        let status = cmd
+            .arg(url)
             .arg(into.to_str().unwrap())
             .status()
-            .map_err(|io_err| git2::Error::from_str(&format!("git CLI fallback failed: {}", io_err)))?;
-            
+            .map_err(|io_err| {
+                git2::Error::from_str(&format!("git CLI fallback failed: {}", io_err))
+            })?;
+
         if !status.success() {
             return Err(git2::Error::from_str("git CLI clone failed"));
         }
     }
-    
+
     Ok(())
 }

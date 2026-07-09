@@ -30,7 +30,9 @@ pub struct ParserRegistry {
 
 impl ParserRegistry {
     pub fn new() -> Self {
-        Self { parsers: Vec::new() }
+        Self {
+            parsers: Vec::new(),
+        }
     }
 
     /// Register a parser. Later registrations for the same extension win.
