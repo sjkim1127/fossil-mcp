@@ -41,6 +41,12 @@ pub struct AnalyzeMigrationInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ScanVulnerabilitiesInput {
+    #[schemars(description = "Absolute path to the local workspace directory to scan")]
+    pub workspace_path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct IndexRepoInput {
     #[schemars(description = "Repository ID returned by clone_reference")]
     pub repo_id: String,
@@ -572,6 +578,54 @@ impl FossilServer {
             }
 
             Ok(serde_json::to_value(patterns).map_err(|e| e.to_string())?)
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        Ok(result.to_string())
+    }
+
+    // ── scan_vulnerabilities ────────────────────────────────────────────────
+
+    #[tool(description = "Scans a local workspace for structural CVE patterns.")]
+    async fn scan_vulnerabilities(
+        &self,
+        Parameters(input): Parameters<ScanVulnerabilitiesInput>,
+    ) -> Result<String, McpError> {
+        info!("scan_vulnerabilities: workspace={}", input.workspace_path);
+
+        let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
+            let workspace = std::path::Path::new(&input.workspace_path);
+            if !workspace.exists() || !workspace.is_dir() {
+                return Err(format!("Workspace '{}' not found or is not a directory.", input.workspace_path));
+            }
+
+            let registry = default_registry();
+            let mut detected = Vec::new();
+
+            for entry in walkdir::WalkDir::new(workspace).into_iter().filter_map(|e| e.ok()) {
+                if entry.file_type().is_file() {
+                    let path = entry.path();
+                    // Basic filter to avoid scanning non-code files
+                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                        if registry.for_extension(ext).is_some() {
+                            if let Ok(content) = std::fs::read_to_string(path) {
+                                if let Some(path_str) = path.to_str() {
+                                    let mut results = fossil_indexer::vulnerability::scan_file_for_vulnerabilities(
+                                        &registry,
+                                        path_str,
+                                        &content
+                                    );
+                                    detected.append(&mut results);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(serde_json::to_value(detected).map_err(|e| e.to_string())?)
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?
