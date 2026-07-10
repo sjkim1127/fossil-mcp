@@ -81,7 +81,7 @@ It is intentionally modest in scope: it does not claim to understand every behav
 
 ## Quick start
 
-- Install a recent Rust toolchain. The workspace uses Rust 2024 edition and declares Rust 1.85 as the minimum supported version.
+- Install a recent Rust toolchain. The workspace uses Rust 2024 edition and declares Rust 1.88 as the minimum supported version.
 - Clone this repository.
 - Build the release binary.
 - Point your MCP client at the compiled `fossil-mcp` executable.
