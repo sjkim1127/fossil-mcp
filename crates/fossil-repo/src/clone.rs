@@ -40,7 +40,7 @@ pub fn clone_repo(opts: CloneOptions<'_>) -> Result<RepoMeta, RepoError> {
         let store = CacheManager::global_store()?;
         return store
             .get_repo(&repo_id)
-            .map_err(|e| RepoError::Storage(e.into()))
+            .map_err(RepoError::Storage)
             .or_else(|_| {
                 // DB exists but no row yet — synthesise metadata.
                 Ok(RepoMeta {
@@ -83,9 +83,7 @@ pub fn clone_repo(opts: CloneOptions<'_>) -> Result<RepoMeta, RepoError> {
 
     // Persist metadata to the global SQLite DB.
     let store = CacheManager::global_store()?;
-    store
-        .upsert_repo(&meta)
-        .map_err(|e| RepoError::Storage(e))?;
+    store.upsert_repo(&meta).map_err(RepoError::Storage)?;
 
     info!("Clone complete for repo_id={}", repo_id);
     Ok(meta)

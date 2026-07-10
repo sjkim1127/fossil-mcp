@@ -38,7 +38,7 @@ impl Searcher for FuzzySearcher {
             .collect();
 
         // Sort by score descending.
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|b| std::cmp::Reverse(b.0));
 
         let max_score = scored.first().map(|(s, _)| *s).unwrap_or(1).max(1) as f64;
 

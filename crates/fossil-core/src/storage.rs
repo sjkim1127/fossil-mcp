@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, ffi::sqlite3_auto_extension, params};
 use sqlite_vec::sqlite3_vec_init;
 use std::sync::Once;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::error::StorageError;
 use crate::types::{CallEdge, RepoMeta, Symbol, SymbolKind};
@@ -23,7 +23,14 @@ impl GlobalStore {
         // Register the sqlite-vec extension globally for all connections (once).
         static INIT_VEC: Once = Once::new();
         INIT_VEC.call_once(|| unsafe {
-            sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
+            sqlite3_auto_extension(Some(std::mem::transmute::<
+                *const (),
+                unsafe extern "C" fn(
+                    *mut rusqlite::ffi::sqlite3,
+                    *mut *mut i8,
+                    *const rusqlite::ffi::sqlite3_api_routines,
+                ) -> i32,
+            >(sqlite3_vec_init as *const ())));
         });
 
         let conn = Connection::open(db_path)?;

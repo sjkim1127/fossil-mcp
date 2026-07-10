@@ -10,6 +10,8 @@ use fossil_core::types::{CallEdge, Symbol};
 use crate::error::IndexError;
 use crate::parser::ParserRegistry;
 
+type ParseResult = Result<(Vec<Symbol>, Vec<CallEdge>), IndexError>;
+
 /// Walk `repo_dir`, parse every source file with the appropriate language parser,
 /// and return the collected symbols and call edges.
 ///
@@ -40,7 +42,7 @@ pub fn index_directory(
     debug!("Found {} indexable files in {:?}", files.len(), repo_dir);
 
     // Parallel parse.
-    let results: Vec<Result<(Vec<Symbol>, Vec<CallEdge>), IndexError>> = files
+    let results: Vec<ParseResult> = files
         .par_iter()
         .map(|path| parse_file(path, repo_dir, repo_id, registry))
         .collect();

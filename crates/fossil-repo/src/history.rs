@@ -27,7 +27,7 @@ fn get_file_content_from_tree(
             "Path not found in tree",
         ))
     })?;
-    let object = entry.to_object(repo).map_err(|e| RepoError::Git(e))?;
+    let object = entry.to_object(repo).map_err(RepoError::Git)?;
     if let Some(blob) = object.as_blob() {
         if blob.is_binary() {
             return Ok(String::new());
@@ -62,10 +62,8 @@ pub fn get_file_changes(
     diff.print(git2::DiffFormat::Patch, |delta, _hunk, line| {
         if let Some(path) = delta.new_file().path().and_then(|p| p.to_str()) {
             // Very naive filter matching:
-            if !file_pattern.is_empty() {
-                if !path.ends_with(file_pattern.trim_start_matches('*')) {
-                    return true; // Skip
-                }
+            if !file_pattern.is_empty() && !path.ends_with(file_pattern.trim_start_matches('*')) {
+                return true; // Skip
             }
 
             let entry = changes.entry(path.to_string()).or_insert_with(|| {

@@ -4,7 +4,7 @@ use std::io::Read;
 use std::path::Path;
 
 use protobuf::Message;
-use scip::types::{Index, Occurrence};
+use scip::types::Index;
 
 use crate::error::IndexError;
 use fossil_core::types::{CallEdge, Symbol, SymbolKind};
@@ -14,10 +14,9 @@ pub fn parse_scip_index(
     path: &Path,
     repo_id: &str,
 ) -> Result<(Vec<Symbol>, Vec<CallEdge>), IndexError> {
-    let mut file = File::open(path).map_err(|e| IndexError::Io(e))?;
+    let mut file = File::open(path).map_err(IndexError::Io)?;
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|e| IndexError::Io(e))?;
+    file.read_to_end(&mut bytes).map_err(IndexError::Io)?;
 
     let index = Index::parse_from_bytes(&bytes).map_err(|e| IndexError::ParseFailed {
         file: path.display().to_string(),
@@ -49,7 +48,11 @@ pub fn parse_scip_index(
 
                 let kind = SymbolKind::Function;
                 let mut signature = String::new();
-                let mut display_name = sym_str.split('.').last().unwrap_or(sym_str).to_string();
+                let mut display_name = sym_str
+                    .split('.')
+                    .next_back()
+                    .unwrap_or(sym_str)
+                    .to_string();
                 if display_name.ends_with("().") || display_name.ends_with("()") {
                     display_name = display_name
                         .trim_end_matches("().")
@@ -112,13 +115,13 @@ pub fn parse_scip_index(
                     let mut caller_name = caller_def
                         .symbol
                         .split('.')
-                        .last()
+                        .next_back()
                         .unwrap_or(&caller_def.symbol)
                         .to_string();
                     let mut callee_name = occ
                         .symbol
                         .split('.')
-                        .last()
+                        .next_back()
                         .unwrap_or(&occ.symbol)
                         .to_string();
 

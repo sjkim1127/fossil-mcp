@@ -55,7 +55,7 @@ impl CacheManager {
     /// Return metadata for every cached (and indexed) repo.
     pub fn list_all() -> Result<Vec<RepoMeta>, RepoError> {
         let store = Self::global_store()?;
-        store.list_repos().map_err(|e| RepoError::Storage(e.into()))
+        store.list_repos().map_err(RepoError::Storage)
     }
 
     /// Recursively calculates the size of a directory.
@@ -90,9 +90,7 @@ impl CacheManager {
                 break;
             }
 
-            let mut repos = store
-                .list_repos()
-                .map_err(|e| RepoError::Storage(e.into()))?;
+            let mut repos = store.list_repos().map_err(RepoError::Storage)?;
             if repos.is_empty() {
                 break; // Nothing left to evict
             }

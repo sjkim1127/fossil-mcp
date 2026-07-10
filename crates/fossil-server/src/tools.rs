@@ -9,7 +9,6 @@ use serde::Deserialize;
 use serde_json::json;
 use tracing::{debug, info};
 
-use fossil_core::storage::GlobalStore;
 use fossil_indexer::{index_directory, languages::default_registry, migration, parse_scip_index};
 use fossil_repo::{cache::CacheManager, clone::CloneOptions, history};
 use fossil_search::{FuzzySearcher, semantic::SemanticSearcher, traits::Searcher};
@@ -577,7 +576,7 @@ impl FossilServer {
                 }
             }
 
-            Ok(serde_json::to_value(patterns).map_err(|e| e.to_string())?)
+            serde_json::to_value(patterns).map_err(|e| e.to_string())
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?
@@ -625,7 +624,7 @@ impl FossilServer {
                 }
             }
 
-            Ok(serde_json::to_value(detected).map_err(|e| e.to_string())?)
+            serde_json::to_value(detected).map_err(|e| e.to_string())
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?
@@ -663,6 +662,6 @@ mod tests {
         println!("Result: {}", res);
 
         let val: serde_json::Value = serde_json::from_str(&res).unwrap();
-        assert!(val["matches"].as_array().unwrap().len() > 0);
+        assert!(!val["matches"].as_array().unwrap().is_empty());
     }
 }
