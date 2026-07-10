@@ -806,7 +806,7 @@ dependencies = [
 
 [[package]]
 name = "fossil-core"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "bytemuck",
  "chrono",
@@ -821,7 +821,7 @@ dependencies = [
 
 [[package]]
 name = "fossil-indexer"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "fossil-core",
  "protobuf",
@@ -839,7 +839,7 @@ dependencies = [
 
 [[package]]
 name = "fossil-repo"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "fossil-core",
@@ -853,7 +853,7 @@ dependencies = [
 
 [[package]]
 name = "fossil-search"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "fastembed",
  "fossil-core",
@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "fossil-server"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "chrono",
