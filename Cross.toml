@@ -1,0 +1,4 @@
+[build.env]
+passthrough = [
+    "ORT_CACHE_DIR"
+]

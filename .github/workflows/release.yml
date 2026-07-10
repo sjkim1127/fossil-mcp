@@ -9,7 +9,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   BINARY_NAME: fossil-mcp
-  ORT_CACHE_DIR: .ort-cache
 
 # Permissions needed to create GitHub Releases and upload assets.
 permissions:
@@ -80,6 +79,7 @@ jobs:
       - name: Cache Cargo registry & build artefacts
         uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: "v2"
           key: release-${{ matrix.target }}
           cache-directories: |
             .ort-cache
@@ -98,13 +98,13 @@ jobs:
         if: matrix.use_cross
         run: |
           cargo clean -p ort-sys || true
-          cross build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
+          ORT_CACHE_DIR=/project/.ort-cache cross build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
 
       - name: Build release binary (cargo)
         if: '!matrix.use_cross'
         run: |
           cargo clean -p ort-sys || true
-          cargo build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
+          ORT_CACHE_DIR=${{ github.workspace }}/.ort-cache cargo build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
 
       # ── Package ───────────────────────────────────────────────────────────
 
