@@ -9,6 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   BINARY_NAME: fossil-mcp
+  ORT_CACHE_DIR: .ort-cache
 
 # Permissions needed to create GitHub Releases and upload assets.
 permissions:
@@ -80,6 +81,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: release-${{ matrix.target }}
+          cache-directories: |
+            .ort-cache
 
       # ── Install `cross` for cross-compilation ─────────────────────────────
 
