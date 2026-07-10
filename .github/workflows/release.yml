@@ -24,9 +24,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux – x86_64, statically linked via musl (maximum portability)
-          - target: x86_64-unknown-linux-musl
-            runner: ubuntu-latest
+          # Linux – x86_64
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-20.04
             use_cross: false
             archive_ext: tar.gz
 
