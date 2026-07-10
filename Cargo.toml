@@ -56,7 +56,7 @@ tree-sitter-typescript = "0.23"
 
 # Search
 nucleo-matcher = "0.3"
-fastembed = "5"
+fastembed = { version = "5", default-features = false, features = ["ort-download-binaries-rustls-tls", "hf-hub-rustls-tls", "image-models"] }
 
 # Storage
 rusqlite = { version = "0.39", features = ["bundled"] }
