@@ -96,11 +96,15 @@ jobs:
 
       - name: Build release binary (cross)
         if: matrix.use_cross
-        run: cross build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
+        run: |
+          cargo clean -p ort-sys || true
+          cross build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
 
       - name: Build release binary (cargo)
         if: '!matrix.use_cross'
-        run: cargo build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
+        run: |
+          cargo clean -p ort-sys || true
+          cargo build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
 
       # ── Package ───────────────────────────────────────────────────────────
 
