@@ -200,10 +200,10 @@ impl FossilServer {
             };
 
             // Apply language filter if requested.
-            if let Some(ref langs) = languages {
-                if !langs.is_empty() {
-                    symbols.retain(|s| langs.iter().any(|l| l.eq_ignore_ascii_case(&s.language)));
-                }
+            if let Some(ref langs) = languages
+                && !langs.is_empty()
+            {
+                symbols.retain(|s| langs.iter().any(|l| l.eq_ignore_ascii_case(&s.language)));
             }
 
             let duration_ms = start.elapsed().as_millis() as u64;
@@ -305,19 +305,18 @@ impl FossilServer {
             // Try Semantic Search first
             let mut search_results = Vec::new();
             if let Ok(mut query_embeds) = SemanticSearcher::generate_embeddings(vec![query.clone()])
+                && let Some(query_embed) = query_embeds.pop()
             {
-                if let Some(query_embed) = query_embeds.pop() {
-                    match store.search_embeddings(&query_embed, top_k, repo_id.as_deref()) {
-                        Ok(vec_results) => {
-                            for (sym_id, distance) in vec_results {
-                                if let Some(sym) = symbols.iter().find(|s| s.id == Some(sym_id)) {
-                                    search_results.push((sym.clone(), distance));
-                                }
+                match store.search_embeddings(&query_embed, top_k, repo_id.as_deref()) {
+                    Ok(vec_results) => {
+                        for (sym_id, distance) in vec_results {
+                            if let Some(sym) = symbols.iter().find(|s| s.id == Some(sym_id)) {
+                                search_results.push((sym.clone(), distance));
                             }
                         }
-                        Err(e) => {
-                            tracing::error!("search_embeddings failed: {:?}", e);
-                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("search_embeddings failed: {:?}", e);
                     }
                 }
             }
@@ -597,29 +596,32 @@ impl FossilServer {
         let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
             let workspace = std::path::Path::new(&input.workspace_path);
             if !workspace.exists() || !workspace.is_dir() {
-                return Err(format!("Workspace '{}' not found or is not a directory.", input.workspace_path));
+                return Err(format!(
+                    "Workspace '{}' not found or is not a directory.",
+                    input.workspace_path
+                ));
             }
 
             let registry = default_registry();
             let mut detected = Vec::new();
 
-            for entry in walkdir::WalkDir::new(workspace).into_iter().filter_map(|e| e.ok()) {
+            for entry in walkdir::WalkDir::new(workspace)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
                 if entry.file_type().is_file() {
                     let path = entry.path();
                     // Basic filter to avoid scanning non-code files
-                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                        if registry.for_extension(ext).is_some() {
-                            if let Ok(content) = std::fs::read_to_string(path) {
-                                if let Some(path_str) = path.to_str() {
-                                    let mut results = fossil_indexer::vulnerability::scan_file_for_vulnerabilities(
-                                        &registry,
-                                        path_str,
-                                        &content
-                                    );
-                                    detected.append(&mut results);
-                                }
-                            }
-                        }
+                    if let Some(ext) = path.extension().and_then(|e| e.to_str())
+                        && registry.for_extension(ext).is_some()
+                        && let Ok(content) = std::fs::read_to_string(path)
+                        && let Some(path_str) = path.to_str()
+                    {
+                        let mut results =
+                            fossil_indexer::vulnerability::scan_file_for_vulnerabilities(
+                                &registry, path_str, &content,
+                            );
+                        detected.append(&mut results);
                     }
                 }
             }

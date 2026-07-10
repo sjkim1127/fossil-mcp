@@ -124,10 +124,10 @@ impl CacheManager {
 
             // 2. Delete physical clone dir
             let repo_dir = Self::repo_dir(&oldest_repo.repo_id);
-            if repo_dir.exists() {
-                if let Err(e) = std::fs::remove_dir_all(&repo_dir) {
-                    tracing::warn!("Failed to remove directory {:?}: {}", repo_dir, e);
-                }
+            if repo_dir.exists()
+                && let Err(e) = std::fs::remove_dir_all(&repo_dir)
+            {
+                tracing::warn!("Failed to remove directory {:?}: {}", repo_dir, e);
             }
 
             // Re-calculate on next loop iteration until under max_bytes

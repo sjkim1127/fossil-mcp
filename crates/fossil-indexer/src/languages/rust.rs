@@ -198,18 +198,17 @@ fn collect_rust_calls(
 
     let caller = fn_name.as_deref().or(current_fn);
 
-    if kind == "call_expression" {
-        if let Some(callee_name) = extract_call_callee(source, node) {
-            if let Some(c) = caller {
-                out.push(CallEdge {
-                    repo_id: String::new(),
-                    caller: c.to_string(),
-                    callee: callee_name,
-                    file_path: file_path.to_string(),
-                    line: node.start_position().row as u32 + 1,
-                });
-            }
-        }
+    if kind == "call_expression"
+        && let Some(callee_name) = extract_call_callee(source, node)
+        && let Some(c) = caller
+    {
+        out.push(CallEdge {
+            repo_id: String::new(),
+            caller: c.to_string(),
+            callee: callee_name,
+            file_path: file_path.to_string(),
+            line: node.start_position().row as u32 + 1,
+        });
     }
 
     for child in node.children(&mut node.walk()) {
