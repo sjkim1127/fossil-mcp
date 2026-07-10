@@ -32,8 +32,8 @@ jobs:
 
           # Linux – ARM64
           - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-latest
-            use_cross: true           # use `cross` for ARM cross-compilation
+            runner: ubuntu-24.04-arm
+            use_cross: false
             archive_ext: tar.gz
             ort_cache_path: ~/.cache/ort.pyke.io
 
