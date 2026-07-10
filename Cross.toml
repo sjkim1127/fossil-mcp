@@ -2,3 +2,6 @@
 passthrough = [
     "ORT_CACHE_DIR"
 ]
+volumes = [
+    "ORT_CACHE_DIR"
+]

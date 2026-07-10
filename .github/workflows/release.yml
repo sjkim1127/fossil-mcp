@@ -28,30 +28,35 @@ jobs:
             runner: ubuntu-20.04
             use_cross: false
             archive_ext: tar.gz
+            ort_cache_path: ~/.cache/ort.pyke.io
 
           # Linux – ARM64
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-latest
             use_cross: true           # use `cross` for ARM cross-compilation
             archive_ext: tar.gz
+            ort_cache_path: ~/.cache/ort.pyke.io
 
           # macOS – Intel
           - target: x86_64-apple-darwin
             runner: macos-13          # macos-13 = last x86_64 runner
             use_cross: false
             archive_ext: tar.gz
+            ort_cache_path: ~/Library/Caches/ort.pyke.io
 
           # macOS – Apple Silicon
           - target: aarch64-apple-darwin
             runner: macos-latest      # macos-latest = M-series (arm64)
             use_cross: false
             archive_ext: tar.gz
+            ort_cache_path: ~/Library/Caches/ort.pyke.io
 
           # Windows – x86_64
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
             use_cross: false
             archive_ext: zip
+            ort_cache_path: ~\AppData\Local\ort.pyke.io
 
     steps:
       - uses: actions/checkout@v4
@@ -76,13 +81,19 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Cache the ORT binary downloads keyed by target (populated by ort-sys build script)
+      - name: Cache ORT binaries
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.ort_cache_path }}
+          key: ort-bin-${{ matrix.target }}-v1
+
       - name: Cache Cargo registry & build artefacts
         uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: "v2"
+          prefix-key: "v3"
           key: release-${{ matrix.target }}
-          cache-directories: |
-            .ort-cache
+          save-if: ${{ github.ref_type == 'tag' }}
 
       # ── Install `cross` for cross-compilation ─────────────────────────────
 
@@ -96,15 +107,15 @@ jobs:
 
       - name: Build release binary (cross)
         if: matrix.use_cross
-        run: |
-          cargo clean -p ort-sys || true
-          ORT_CACHE_DIR=/project/.ort-cache cross build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
+        run: cross build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
+        env:
+          ORT_CACHE_DIR: ${{ matrix.ort_cache_path }}
 
       - name: Build release binary (cargo)
         if: '!matrix.use_cross'
-        run: |
-          cargo clean -p ort-sys || true
-          ORT_CACHE_DIR=${{ github.workspace }}/.ort-cache cargo build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
+        run: cargo build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
+        env:
+          ORT_CACHE_DIR: ${{ matrix.ort_cache_path }}
 
       # ── Package ───────────────────────────────────────────────────────────
 
