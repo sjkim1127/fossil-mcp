@@ -81,6 +81,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Ensure ORT cache dir exists (cross uses file::canonicalize which fails on missing paths)
+      - name: Ensure ORT cache dir exists
+        shell: bash
+        run: mkdir -p "$HOME/.cache/ort.pyke.io" "$HOME/Library/Caches/ort.pyke.io" 2>/dev/null || mkdir -p "$HOME/.cache/ort.pyke.io" 2>/dev/null || true
+
       # Cache the ORT binary downloads keyed by target (populated by ort-sys build script)
       - name: Cache ORT binaries
         uses: actions/cache@v4
@@ -107,9 +112,9 @@ jobs:
 
       - name: Build release binary (cross)
         if: matrix.use_cross
-        run: cross build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
-        env:
-          ORT_CACHE_DIR: ${{ matrix.ort_cache_path }}
+        run: |
+          mkdir -p "$HOME/.cache/ort.pyke.io"
+          ORT_CACHE_DIR="$HOME/.cache/ort.pyke.io" cross build --release --locked --bin fossil-mcp --target ${{ matrix.target }}
 
       - name: Build release binary (cargo)
         if: '!matrix.use_cross'
