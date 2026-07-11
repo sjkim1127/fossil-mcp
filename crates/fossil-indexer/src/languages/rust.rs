@@ -120,6 +120,9 @@ fn extract_function(
         line_end: end.row as u32 + 1,
         signature: sig,
         language: "rust".to_string(),
+        source: fossil_core::SymbolSource::default(),
+        package_name: None,
+        package_version: None,
     })
 }
 
@@ -146,6 +149,9 @@ fn extract_named_item(
         line_end: end.row as u32 + 1,
         signature: first_line.trim().to_string(),
         language: "rust".to_string(),
+        source: fossil_core::SymbolSource::default(),
+        package_name: None,
+        package_version: None,
     })
 }
 

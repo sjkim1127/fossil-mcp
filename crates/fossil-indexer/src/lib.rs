@@ -1,3 +1,4 @@
+pub mod deps;
 pub mod error;
 pub mod graph;
 pub mod languages;
@@ -5,6 +6,7 @@ pub mod parser;
 pub mod scip;
 pub mod symbol;
 
+pub use deps::{index_cpp_deps, index_js_deps, index_python_deps, index_rust_deps};
 pub use error::IndexError;
 pub use parser::{LanguageParser, ParserRegistry};
 pub use scip::parse_scip_index;

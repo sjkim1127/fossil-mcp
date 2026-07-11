@@ -69,6 +69,9 @@ mod tests {
             line_end: 10,
             signature: sig.to_string(),
             language: "rust".to_string(),
+            source: fossil_core::SymbolSource::UserCode,
+            package_name: None,
+            package_version: None,
         }
     }
 

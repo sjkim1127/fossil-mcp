@@ -124,6 +124,9 @@ fn extract_ts_function(
         line_end: end.row as u32 + 1,
         signature: sig,
         language: "typescript".to_string(),
+        source: fossil_core::SymbolSource::default(),
+        package_name: None,
+        package_version: None,
     })
 }
 
@@ -149,6 +152,9 @@ fn extract_ts_named(
         line_end: end.row as u32 + 1,
         signature: first_line.trim().to_string(),
         language: "typescript".to_string(),
+        source: fossil_core::SymbolSource::default(),
+        package_name: None,
+        package_version: None,
     })
 }
 
@@ -177,6 +183,9 @@ fn extract_arrow_fn(source: &[u8], declarator: Node<'_>, file_path: &str) -> Opt
         line_end: end.row as u32 + 1,
         signature: sig,
         language: "typescript".to_string(),
+        source: fossil_core::SymbolSource::default(),
+        package_name: None,
+        package_version: None,
     })
 }
 

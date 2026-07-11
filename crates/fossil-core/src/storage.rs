@@ -2,13 +2,13 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, ffi::sqlite3_auto_extension, params};
+use rusqlite::{Connection, OptionalExtension, ffi::sqlite3_auto_extension, params};
 use sqlite_vec::sqlite3_vec_init;
 use std::sync::Once;
 use tracing::debug;
 
 use crate::error::StorageError;
-use crate::types::{CallEdge, RepoMeta, Symbol, SymbolKind};
+use crate::types::{CallEdge, RepoMeta, Symbol, SymbolKind, SymbolSource};
 
 /// Manages the SQLite index database globally across all repositories.
 ///
@@ -59,15 +59,19 @@ impl GlobalStore {
             );
 
             CREATE TABLE IF NOT EXISTS symbols (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                repo_id     TEXT NOT NULL,
-                name        TEXT NOT NULL,
-                kind        TEXT NOT NULL,
-                file_path   TEXT NOT NULL,
-                line_start  INTEGER NOT NULL,
-                line_end    INTEGER NOT NULL,
-                signature   TEXT NOT NULL,
-                language    TEXT NOT NULL
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                repo_id         TEXT NOT NULL,
+                name            TEXT NOT NULL,
+                kind            TEXT NOT NULL,
+                file_path       TEXT NOT NULL,
+                line_start      INTEGER NOT NULL,
+                line_end        INTEGER NOT NULL,
+                signature       TEXT NOT NULL,
+                language        TEXT NOT NULL,
+                -- Dependency metadata (NULL for user code)
+                source          TEXT NOT NULL DEFAULT 'user_code',
+                package_name    TEXT,
+                package_version TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_symbols_repo_id ON symbols(repo_id);
@@ -87,6 +91,21 @@ impl GlobalStore {
             CREATE INDEX IF NOT EXISTS idx_call_edges_caller ON call_edges(caller);
             CREATE INDEX IF NOT EXISTS idx_call_edges_callee ON call_edges(callee);
 
+            -- Tracks which external packages have already been indexed (for cache).
+            -- UNIQUE on (name, version, language) prevents duplicate indexing.
+            CREATE TABLE IF NOT EXISTS indexed_packages (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                name         TEXT NOT NULL,
+                version      TEXT NOT NULL,
+                language     TEXT NOT NULL,
+                source_path  TEXT NOT NULL,
+                symbol_count INTEGER NOT NULL DEFAULT 0,
+                indexed_at   INTEGER NOT NULL,
+                UNIQUE(name, version, language)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_indexed_packages_lang ON indexed_packages(language);
+
             -- Vector table for semantic search. We use 384 dimensions for BGE-small-en-v1.5
             CREATE VIRTUAL TABLE IF NOT EXISTS vec_symbols USING vec0(
                 symbol_id INTEGER PRIMARY KEY,
@@ -94,10 +113,28 @@ impl GlobalStore {
             );
             ",
         )?;
-        // Add the column dynamically if it doesn't exist (e.g. from an older schema version)
+        // Dynamic migrations for existing DBs (ignore errors if column already exists)
         let _ = self
             .conn
             .execute("ALTER TABLE repos ADD COLUMN last_accessed_at TEXT", []);
+        let _ = self.conn.execute(
+            "ALTER TABLE symbols ADD COLUMN source TEXT NOT NULL DEFAULT 'user_code'",
+            [],
+        );
+        let _ = self
+            .conn
+            .execute("ALTER TABLE symbols ADD COLUMN package_name TEXT", []);
+        let _ = self
+            .conn
+            .execute("ALTER TABLE symbols ADD COLUMN package_version TEXT", []);
+
+        // Create indices for new columns after they are guaranteed to exist
+        self.conn.execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS idx_symbols_source ON symbols(source);
+            CREATE INDEX IF NOT EXISTS idx_symbols_package ON symbols(package_name, package_version);
+            ",
+        )?;
         Ok(())
     }
 
@@ -282,8 +319,8 @@ impl GlobalStore {
         let tx = self.conn.unchecked_transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO symbols (repo_id, name, kind, file_path, line_start, line_end, signature, language)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO symbols (repo_id, name, kind, file_path, line_start, line_end, signature, language, source, package_name, package_version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )?;
             for sym in symbols {
                 stmt.execute(params![
@@ -295,6 +332,9 @@ impl GlobalStore {
                     sym.line_end,
                     sym.signature,
                     sym.language,
+                    sym.source.to_string(),
+                    sym.package_name,
+                    sym.package_version,
                 ])?;
             }
         }
@@ -308,7 +348,7 @@ impl GlobalStore {
         let mut stmt;
         if let Some(r_id) = repo_id {
             stmt = self.conn.prepare(
-                "SELECT id, repo_id, name, kind, file_path, line_start, line_end, signature, language FROM symbols WHERE repo_id = ?1",
+                "SELECT id, repo_id, name, kind, file_path, line_start, line_end, signature, language, source, package_name, package_version FROM symbols WHERE repo_id = ?1",
             )?;
             let rows = stmt.query_map(params![r_id], |row| {
                 Ok((
@@ -321,6 +361,9 @@ impl GlobalStore {
                     row.get::<_, u32>(6)?,
                     row.get::<_, String>(7)?,
                     row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
                 ))
             })?;
 
@@ -328,6 +371,7 @@ impl GlobalStore {
             for row in rows {
                 let r = row?;
                 let kind = SymbolKind::from_str(&r.3).unwrap_or(SymbolKind::Function);
+                let source = r.9.parse::<SymbolSource>().unwrap_or_default();
                 result.push(Symbol {
                     id: Some(r.0),
                     repo_id: r.1,
@@ -338,12 +382,15 @@ impl GlobalStore {
                     line_end: r.6,
                     signature: r.7,
                     language: r.8,
+                    source,
+                    package_name: r.10,
+                    package_version: r.11,
                 });
             }
             Ok(result)
         } else {
             stmt = self.conn.prepare(
-                "SELECT id, repo_id, name, kind, file_path, line_start, line_end, signature, language FROM symbols",
+                "SELECT id, repo_id, name, kind, file_path, line_start, line_end, signature, language, source, package_name, package_version FROM symbols",
             )?;
             let rows = stmt.query_map([], |row| {
                 Ok((
@@ -356,6 +403,9 @@ impl GlobalStore {
                     row.get::<_, u32>(6)?,
                     row.get::<_, String>(7)?,
                     row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
                 ))
             })?;
 
@@ -363,6 +413,7 @@ impl GlobalStore {
             for row in rows {
                 let r = row?;
                 let kind = SymbolKind::from_str(&r.3).unwrap_or(SymbolKind::Function);
+                let source = r.9.parse::<SymbolSource>().unwrap_or_default();
                 result.push(Symbol {
                     id: Some(r.0),
                     repo_id: r.1,
@@ -373,10 +424,105 @@ impl GlobalStore {
                     line_end: r.6,
                     signature: r.7,
                     language: r.8,
+                    source,
+                    package_name: r.10,
+                    package_version: r.11,
                 });
             }
             Ok(result)
         }
+    }
+
+    // ── indexed_packages (dependency cache) ────────────────────────────────
+
+    /// Check if a package is already indexed. Returns Some(symbol_count) if yes.
+    pub fn is_package_indexed(
+        &self,
+        name: &str,
+        version: &str,
+        language: &str,
+    ) -> Result<Option<i64>, StorageError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT symbol_count FROM indexed_packages WHERE name = ?1 AND version = ?2 AND language = ?3",
+        )?;
+        let result = stmt
+            .query_row(params![name, version, language], |row| row.get::<_, i64>(0))
+            .optional();
+        match result {
+            Ok(opt) => Ok(opt),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StorageError::Sqlite(e)),
+        }
+    }
+
+    /// Mark a package as indexed (upsert).
+    pub fn mark_package_indexed(
+        &self,
+        name: &str,
+        version: &str,
+        language: &str,
+        source_path: &str,
+        symbol_count: i64,
+    ) -> Result<(), StorageError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.conn.execute(
+            "INSERT INTO indexed_packages (name, version, language, source_path, symbol_count, indexed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(name, version, language) DO UPDATE SET
+                source_path  = excluded.source_path,
+                symbol_count = excluded.symbol_count,
+                indexed_at   = excluded.indexed_at",
+            params![name, version, language, source_path, symbol_count, now],
+        )?;
+        Ok(())
+    }
+
+    /// List all indexed packages.
+    pub fn list_indexed_packages(
+        &self,
+        language: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, StorageError> {
+        let mut stmt;
+        let rows: Vec<_>;
+        if let Some(lang) = language {
+            stmt = self.conn.prepare(
+                "SELECT name, version, language, source_path, symbol_count, indexed_at FROM indexed_packages WHERE language = ?1 ORDER BY name",
+            )?;
+            rows = stmt
+                .query_map(params![lang], |row| {
+                    Ok(serde_json::json!({
+                        "name":         row.get::<_, String>(0)?,
+                        "version":      row.get::<_, String>(1)?,
+                        "language":     row.get::<_, String>(2)?,
+                        "source_path":  row.get::<_, String>(3)?,
+                        "symbol_count": row.get::<_, i64>(4)?,
+                        "indexed_at":   row.get::<_, i64>(5)?,
+                    }))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+        } else {
+            stmt = self.conn.prepare(
+                "SELECT name, version, language, source_path, symbol_count, indexed_at FROM indexed_packages ORDER BY language, name",
+            )?;
+            rows = stmt
+                .query_map([], |row| {
+                    Ok(serde_json::json!({
+                        "name":         row.get::<_, String>(0)?,
+                        "version":      row.get::<_, String>(1)?,
+                        "language":     row.get::<_, String>(2)?,
+                        "source_path":  row.get::<_, String>(3)?,
+                        "symbol_count": row.get::<_, i64>(4)?,
+                        "indexed_at":   row.get::<_, i64>(5)?,
+                    }))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+        }
+        Ok(rows)
     }
 
     /// Bulk-insert call edges using a transaction.

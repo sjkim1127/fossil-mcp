@@ -112,6 +112,9 @@ fn extract_python_function(
         line_end: end.row as u32 + 1,
         signature: sig,
         language: "python".to_string(),
+        source: fossil_core::SymbolSource::default(),
+        package_name: None,
+        package_version: None,
     })
 }
 
@@ -132,6 +135,9 @@ fn extract_python_class(source: &[u8], node: Node<'_>, file_path: &str) -> Optio
         line_end: end.row as u32 + 1,
         signature: first_line.trim().to_string(),
         language: "python".to_string(),
+        source: fossil_core::SymbolSource::default(),
+        package_name: None,
+        package_version: None,
     })
 }
 

@@ -86,6 +86,9 @@ pub fn parse_scip_index(
                     line_end,
                     signature,
                     language: doc.language.clone(),
+                    source: fossil_core::SymbolSource::default(),
+                    package_name: None,
+                    package_version: None,
                 };
                 symbol_map.insert(sym_str.clone(), sym.clone());
                 symbols.push(sym);

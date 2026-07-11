@@ -9,7 +9,12 @@ use serde::Deserialize;
 use serde_json::json;
 use tracing::{debug, info};
 
-use fossil_indexer::{index_directory, languages::default_registry, migration, parse_scip_index};
+use fossil_indexer::{
+    deps::{index_cpp_deps, index_js_deps, index_python_deps, index_rust_deps},
+    index_directory,
+    languages::default_registry,
+    migration, parse_scip_index,
+};
 use fossil_repo::{cache::CacheManager, clone::CloneOptions, history};
 use fossil_search::{FuzzySearcher, semantic::SemanticSearcher, traits::Searcher};
 
@@ -91,6 +96,20 @@ pub struct AnalyzeFeatureInput {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ListIndexedReposInput {}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct IndexDepsInput {
+    #[schemars(description = "Absolute path to the workspace directory to scan for dependencies")]
+    pub workspace_path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct IndexJsDepsInput {
+    #[schemars(description = "Absolute path to the workspace directory to scan for dependencies")]
+    pub workspace_path: String,
+    #[schemars(description = "Whether to include devDependencies (default: false)")]
+    pub include_dev: Option<bool>,
+}
 
 // ── Server ────────────────────────────────────────────────────────────────────
 
@@ -627,6 +646,168 @@ impl FossilServer {
             }
 
             serde_json::to_value(detected).map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        Ok(result.to_string())
+    }
+
+    // ── Dependencies ─────────────────────────────────────────────────────────
+
+    #[tool(
+        description = "Analyzes Cargo.lock and indexes all transitive Rust dependencies from local ~/.cargo/registry/src. Skips already indexed versions."
+    )]
+    async fn index_rust_deps(
+        &self,
+        Parameters(input): Parameters<IndexDepsInput>,
+    ) -> Result<String, McpError> {
+        info!("index_rust_deps: workspace={}", input.workspace_path);
+        let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
+            let workspace = std::path::Path::new(&input.workspace_path);
+            let store = fossil_core::storage::GlobalStore::open(&fossil_core::storage::global_db_path())
+                .map_err(|e| e.to_string())?;
+            let registry = default_registry();
+
+            let results = index_rust_deps(workspace, &store, &registry)
+                .map_err(|e| e.to_string())?;
+
+            let mut indexed = 0;
+            let mut cached = 0;
+            for r in &results {
+                if r.was_cached { cached += 1; } else { indexed += 1; }
+            }
+
+            Ok(json!({
+                "message": format!("Indexed {} new packages, skipped {} cached packages", indexed, cached),
+                "details": results.into_iter().map(|r| json!({
+                    "package": r.package_name,
+                    "version": r.package_version,
+                    "symbols": r.symbol_count,
+                    "cached": r.was_cached
+                })).collect::<Vec<_>>()
+            }))
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        Ok(result.to_string())
+    }
+
+    #[tool(
+        description = "Analyzes requirements.txt / pyproject.toml and indexes Python dependencies from local site-packages. Skips already indexed versions."
+    )]
+    async fn index_python_deps(
+        &self,
+        Parameters(input): Parameters<IndexDepsInput>,
+    ) -> Result<String, McpError> {
+        info!("index_python_deps: workspace={}", input.workspace_path);
+        let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
+            let workspace = std::path::Path::new(&input.workspace_path);
+            let store = fossil_core::storage::GlobalStore::open(&fossil_core::storage::global_db_path())
+                .map_err(|e| e.to_string())?;
+            let registry = default_registry();
+
+            let results = index_python_deps(workspace, &store, &registry)
+                .map_err(|e| e.to_string())?;
+
+            let mut indexed = 0;
+            let mut cached = 0;
+            for r in &results {
+                if r.was_cached { cached += 1; } else { indexed += 1; }
+            }
+
+            Ok(json!({
+                "message": format!("Indexed {} new packages, skipped {} cached packages", indexed, cached),
+                "details": results.into_iter().map(|r| json!({
+                    "package": r.package_name,
+                    "version": r.package_version,
+                    "symbols": r.symbol_count,
+                    "cached": r.was_cached
+                })).collect::<Vec<_>>()
+            }))
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        Ok(result.to_string())
+    }
+
+    #[tool(
+        description = "Analyzes package.json and indexes JS/TS dependencies from local node_modules. Skips already indexed versions."
+    )]
+    async fn index_js_deps(
+        &self,
+        Parameters(input): Parameters<IndexJsDepsInput>,
+    ) -> Result<String, McpError> {
+        info!("index_js_deps: workspace={}", input.workspace_path);
+        let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
+            let workspace = std::path::Path::new(&input.workspace_path);
+            let store = fossil_core::storage::GlobalStore::open(&fossil_core::storage::global_db_path())
+                .map_err(|e| e.to_string())?;
+            let registry = default_registry();
+
+            let results = index_js_deps(workspace, &store, &registry, input.include_dev.unwrap_or(false))
+                .map_err(|e| e.to_string())?;
+
+            let mut indexed = 0;
+            let mut cached = 0;
+            for r in &results {
+                if r.was_cached { cached += 1; } else { indexed += 1; }
+            }
+
+            Ok(json!({
+                "message": format!("Indexed {} new packages, skipped {} cached packages", indexed, cached),
+                "details": results.into_iter().map(|r| json!({
+                    "package": r.package_name,
+                    "version": r.package_version,
+                    "symbols": r.symbol_count,
+                    "cached": r.was_cached
+                })).collect::<Vec<_>>()
+            }))
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        Ok(result.to_string())
+    }
+
+    #[tool(
+        description = "Analyzes vcpkg.json, conanfile.txt or CMakeLists and indexes C/C++ dependencies from local installation dirs. Skips already indexed versions."
+    )]
+    async fn index_cpp_deps(
+        &self,
+        Parameters(input): Parameters<IndexDepsInput>,
+    ) -> Result<String, McpError> {
+        info!("index_cpp_deps: workspace={}", input.workspace_path);
+        let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
+            let workspace = std::path::Path::new(&input.workspace_path);
+            let store = fossil_core::storage::GlobalStore::open(&fossil_core::storage::global_db_path())
+                .map_err(|e| e.to_string())?;
+            let registry = default_registry();
+
+            let results = index_cpp_deps(workspace, &store, &registry)
+                .map_err(|e| e.to_string())?;
+
+            let mut indexed = 0;
+            let mut cached = 0;
+            for r in &results {
+                if r.was_cached { cached += 1; } else { indexed += 1; }
+            }
+
+            Ok(json!({
+                "message": format!("Indexed {} new packages, skipped {} cached packages", indexed, cached),
+                "details": results.into_iter().map(|r| json!({
+                    "package": r.package_name,
+                    "version": r.package_version,
+                    "symbols": r.symbol_count,
+                    "cached": r.was_cached
+                })).collect::<Vec<_>>()
+            }))
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?
