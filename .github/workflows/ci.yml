@@ -112,3 +112,76 @@ jobs:
 
       - name: Build (MSRV)
         run: cargo build --workspace
+
+  # ── E2E (End-to-End) ────────────────────────────────────────────────────────
+  #
+  # Philosophy: "보수적(conservative)" means:
+  #   • Runs ONLY on pushes to main (not on PRs — too expensive & noisy)
+  #   • Single platform (ubuntu-latest) to minimise cost
+  #   • continue-on-error: true  — E2E failures are warnings, not blockers
+  #   • Git repo clone cache: avoid re-cloning itoa on every run
+  #   • RUN_E2E=1 enables the tests; without it they self-skip gracefully
+  #
+  e2e:
+    name: E2E (ubuntu-latest, main only)
+    runs-on: ubuntu-latest
+    # Only run on direct pushes to main — skip on all PRs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # A failing E2E test is surfaced as a warning annotation, NOT a CI failure.
+    # This prevents transient network issues from blocking merges.
+    continue-on-error: true
+    env:
+      RUN_E2E: "1"
+      # Fossil-mcp stores cloned repos here; cache it across runs
+      FOSSIL_CACHE_DIR: ~/.fossil-mcp/cache
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake pkg-config libssl-dev git
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry & build artefacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: e2e-ubuntu
+
+      # Cache the cloned test repositories between runs.
+      # Key includes date (YYYY-MM) so the cache is refreshed monthly
+      # in case upstream repos change significantly.
+      - name: Cache fossil-mcp repo clones
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.FOSSIL_CACHE_DIR }}
+          key: fossil-clone-cache-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            fossil-clone-cache-${{ runner.os }}-
+
+      - name: Build workspace (for E2E)
+        run: cargo build --workspace
+
+      # Run only the #[ignore]-tagged E2E tests.
+      # `--test-threads=1` prevents them from racing over shared clone dirs.
+      - name: Run E2E tests
+        run: |
+          cargo test -p fossil-server \
+            -- --include-ignored --test-threads=1 \
+            2>&1 | tee e2e_output.txt
+        env:
+          RUN_E2E: "1"
+          FOSSIL_CACHE_DIR: ${{ env.FOSSIL_CACHE_DIR }}
+
+      # Surface the output as a step summary regardless of pass/fail
+      - name: Upload E2E output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-output
+          path: e2e_output.txt
+          retention-days: 7

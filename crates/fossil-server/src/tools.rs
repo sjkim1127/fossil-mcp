@@ -828,11 +828,37 @@ impl ServerHandler for FossilServer {}
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_analyze_feature_integration() {
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    /// Returns true only when the `RUN_E2E` env var is set to "1".
+    /// This allows the test suite to skip E2E tests locally by default,
+    /// while the CI `e2e` job explicitly sets the variable.
+    fn e2e_enabled() -> bool {
+        std::env::var("RUN_E2E").as_deref() == Ok("1")
+    }
+
+    fn init_tracing() {
         let _ = tracing_subscriber::fmt()
-            .with_env_filter("debug")
+            .with_env_filter("info")
             .try_init();
+    }
+
+    // ── E2E: full analyze_feature pipeline ──────────────────────────────────
+    //
+    // Requires network access (clones https://github.com/dtolnay/itoa).
+    // Guarded by `#[ignore]`; the CI `e2e` job runs with
+    //   cargo test -- --include-ignored
+    // and sets RUN_E2E=1 to actually execute this test.
+    //
+    #[tokio::test]
+    #[ignore = "E2E: requires network; set RUN_E2E=1 and pass --include-ignored"]
+    async fn e2e_analyze_feature() {
+        if !e2e_enabled() {
+            eprintln!("skip: RUN_E2E != 1");
+            return;
+        }
+        init_tracing();
+
         let server = FossilServer::new();
         let res = server
             .analyze_feature(Parameters(AnalyzeFeatureInput {
@@ -840,11 +866,79 @@ mod tests {
                 query: "write integer to string".to_string(),
             }))
             .await
-            .unwrap();
+            .expect("analyze_feature must succeed");
 
-        println!("Result: {}", res);
+        let val: serde_json::Value =
+            serde_json::from_str(&res).expect("response must be valid JSON");
+        assert!(
+            !val["matches"].as_array().unwrap_or(&vec![]).is_empty(),
+            "expected at least one match for 'write integer to string' in itoa"
+        );
+    }
 
-        let val: serde_json::Value = serde_json::from_str(&res).unwrap();
-        assert!(!val["matches"].as_array().unwrap().is_empty());
+    // ── E2E: clone + index + search, each step validated separately ─────────
+    #[tokio::test]
+    #[ignore = "E2E: requires network; set RUN_E2E=1 and pass --include-ignored"]
+    async fn e2e_clone_index_search_pipeline() {
+        if !e2e_enabled() {
+            eprintln!("skip: RUN_E2E != 1");
+            return;
+        }
+        init_tracing();
+
+        let server = FossilServer::new();
+
+        // Step 1 – clone (small, popular Rust crate for reproducibility)
+        let clone_res = server
+            .clone_reference(Parameters(CloneReferenceInput {
+                repo_url: "https://github.com/dtolnay/itoa".to_string(),
+                alias: Some("itoa-e2e".to_string()),
+                branch: None,
+                refresh: Some(false), // re-use cached clone if present
+            }))
+            .await
+            .expect("clone must succeed");
+
+        let clone_val: serde_json::Value =
+            serde_json::from_str(&clone_res).expect("clone response must be valid JSON");
+        let repo_id = clone_val["repo_id"]
+            .as_str()
+            .expect("clone response must contain repo_id")
+            .to_string();
+
+        // Step 2 – index
+        let index_res = server
+            .index_repo(Parameters(IndexRepoInput {
+                repo_id: repo_id.clone(),
+                languages: None,
+            }))
+            .await
+            .expect("index must succeed");
+
+        let index_val: serde_json::Value =
+            serde_json::from_str(&index_res).expect("index response must be valid JSON");
+        let symbol_count = index_val["symbol_count"].as_u64().unwrap_or(0);
+        assert!(
+            symbol_count > 0,
+            "indexer must extract at least one symbol; got {}",
+            symbol_count
+        );
+
+        // Step 3 – search
+        let search_res = server
+            .locate_implementation(Parameters(LocateImplementationInput {
+                repo_id: Some(repo_id),
+                query: "integer formatting".to_string(),
+                top_k: Some(5),
+            }))
+            .await
+            .expect("search must succeed");
+
+        let search_val: serde_json::Value =
+            serde_json::from_str(&search_res).expect("search response must be valid JSON");
+        assert!(
+            !search_val["matches"].as_array().unwrap_or(&vec![]).is_empty(),
+            "search must return at least one match"
+        );
     }
 }
