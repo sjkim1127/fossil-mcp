@@ -296,13 +296,6 @@ impl GlobalStore {
 
     /// Remove all symbols previously stored for a repository (used before re-indexing).
     pub fn clear_symbols(&self, repo_id: &str) -> Result<(), StorageError> {
-        self.conn.execute_batch(&format!("
-            DELETE FROM symbols WHERE repo_id = '{}';
-            DELETE FROM call_edges WHERE repo_id = '{}';
-            -- For vec_symbols, we would normally delete where symbol_id IN (SELECT id FROM symbols WHERE repo_id = ...)
-            -- But since we just deleted the symbols, we can do it before.
-        ", repo_id, repo_id))?;
-        // Actually, we should use a transaction and proper prepared statements.
         let tx = self.conn.unchecked_transaction()?;
         tx.execute("DELETE FROM vec_symbols WHERE symbol_id IN (SELECT id FROM symbols WHERE repo_id = ?1)", params![repo_id])?;
         tx.execute(
@@ -312,6 +305,96 @@ impl GlobalStore {
         tx.execute("DELETE FROM symbols WHERE repo_id = ?1", params![repo_id])?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Remove symbols, call_edges, and vec_symbols for a specific file in a repository.
+    pub fn remove_file_symbols(&self, repo_id: &str, file_path: &str) -> Result<u64, StorageError> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM vec_symbols WHERE symbol_id IN (SELECT id FROM symbols WHERE repo_id = ?1 AND file_path = ?2)",
+            params![repo_id, file_path],
+        )?;
+        tx.execute(
+            "DELETE FROM call_edges WHERE repo_id = ?1 AND file_path = ?2",
+            params![repo_id, file_path],
+        )?;
+        let count = tx.execute(
+            "DELETE FROM symbols WHERE repo_id = ?1 AND file_path = ?2",
+            params![repo_id, file_path],
+        )?;
+        tx.commit()?;
+        Ok(count as u64)
+    }
+
+    /// Atomically update symbols and call edges for a single file in a repository.
+    /// Returns the inserted symbols (with their new database IDs) for vector embedding generation.
+    pub fn update_file_symbols(
+        &self,
+        repo_id: &str,
+        file_path: &str,
+        symbols: &[Symbol],
+        edges: &[CallEdge],
+    ) -> Result<Vec<Symbol>, StorageError> {
+        let tx = self.conn.unchecked_transaction()?;
+
+        tx.execute(
+            "DELETE FROM vec_symbols WHERE symbol_id IN (SELECT id FROM symbols WHERE repo_id = ?1 AND file_path = ?2)",
+            params![repo_id, file_path],
+        )?;
+        tx.execute(
+            "DELETE FROM call_edges WHERE repo_id = ?1 AND file_path = ?2",
+            params![repo_id, file_path],
+        )?;
+        tx.execute(
+            "DELETE FROM symbols WHERE repo_id = ?1 AND file_path = ?2",
+            params![repo_id, file_path],
+        )?;
+
+        let mut inserted_symbols = Vec::with_capacity(symbols.len());
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO symbols (repo_id, name, kind, file_path, line_start, line_end, signature, language, source, package_name, package_version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            )?;
+            for sym in symbols {
+                stmt.execute(params![
+                    sym.repo_id,
+                    sym.name,
+                    sym.kind.to_string(),
+                    sym.file_path,
+                    sym.line_start,
+                    sym.line_end,
+                    sym.signature,
+                    sym.language,
+                    sym.source.to_string(),
+                    sym.package_name,
+                    sym.package_version,
+                ])?;
+                let last_id = tx.last_insert_rowid();
+                let mut sym_with_id = sym.clone();
+                sym_with_id.id = Some(last_id);
+                inserted_symbols.push(sym_with_id);
+            }
+        }
+
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO call_edges (repo_id, caller, callee, file_path, line)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
+            for edge in edges {
+                stmt.execute(params![
+                    edge.repo_id,
+                    edge.caller,
+                    edge.callee,
+                    edge.file_path,
+                    edge.line,
+                ])?;
+            }
+        }
+
+        tx.commit()?;
+        Ok(inserted_symbols)
     }
 
     /// Bulk-insert symbols using a transaction.
@@ -755,5 +838,47 @@ mod tests {
 
         store.evict_repo("r1").unwrap();
         assert!(store.get_repo("r1").is_err());
+    }
+
+    #[test]
+    fn test_update_and_remove_file_symbols() {
+        let store = get_test_store();
+        let sym1 = crate::types::Symbol {
+            id: None,
+            repo_id: "repo1".to_string(),
+            name: "fn1".to_string(),
+            kind: crate::types::SymbolKind::Function,
+            file_path: "src/main.rs".to_string(),
+            line_start: 1,
+            line_end: 5,
+            signature: "fn fn1()".to_string(),
+            language: "rust".to_string(),
+            source: crate::types::SymbolSource::UserCode,
+            package_name: None,
+            package_version: None,
+        };
+        let edge1 = crate::types::CallEdge {
+            repo_id: "repo1".to_string(),
+            caller: "fn1".to_string(),
+            callee: "fn2".to_string(),
+            file_path: "src/main.rs".to_string(),
+            line: 3,
+        };
+
+        let inserted = store
+            .update_file_symbols("repo1", "src/main.rs", &[sym1], &[edge1])
+            .unwrap();
+        assert_eq!(inserted.len(), 1);
+        assert!(inserted[0].id.is_some());
+
+        let loaded = store.load_symbols(Some("repo1")).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].name, "fn1");
+
+        let removed_count = store.remove_file_symbols("repo1", "src/main.rs").unwrap();
+        assert_eq!(removed_count, 1);
+
+        let remaining = store.load_symbols(Some("repo1")).unwrap();
+        assert_eq!(remaining.len(), 0);
     }
 }

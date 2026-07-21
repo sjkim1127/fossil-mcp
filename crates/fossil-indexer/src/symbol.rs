@@ -72,6 +72,16 @@ pub fn index_directory(
 }
 
 /// Parse a single file and return its symbols and call edges.
+pub fn index_single_file(
+    file_path: &Path,
+    repo_dir: &Path,
+    repo_id: &str,
+    registry: &ParserRegistry,
+) -> Result<(Vec<Symbol>, Vec<CallEdge>), IndexError> {
+    parse_file(file_path, repo_dir, repo_id, registry)
+}
+
+/// Parse a single file and return its symbols and call edges.
 fn parse_file(
     path: &Path,
     repo_dir: &Path,

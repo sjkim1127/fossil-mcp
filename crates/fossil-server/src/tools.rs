@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use chrono::Utc;
@@ -10,8 +12,9 @@ use serde_json::json;
 use tracing::{debug, info};
 
 use fossil_indexer::{
+    WorkspaceWatcher,
     deps::{index_cpp_deps, index_js_deps, index_python_deps, index_rust_deps},
-    index_directory,
+    index_directory, index_single_file,
     languages::default_registry,
     migration, parse_scip_index,
 };
@@ -111,15 +114,53 @@ pub struct IndexJsDepsInput {
     pub include_dev: Option<bool>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateFileIndexInput {
+    #[schemars(description = "Absolute path to workspace directory")]
+    pub workspace_path: String,
+    #[schemars(description = "Repository ID")]
+    pub repo_id: String,
+    #[schemars(description = "File path (relative to workspace or absolute)")]
+    pub file_path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RemoveFileIndexInput {
+    #[schemars(description = "Absolute path to workspace directory")]
+    pub workspace_path: String,
+    #[schemars(description = "Repository ID")]
+    pub repo_id: String,
+    #[schemars(description = "File path (relative to workspace or absolute)")]
+    pub file_path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct WatchWorkspaceInput {
+    #[schemars(description = "Absolute path to workspace directory to watch")]
+    pub workspace_path: String,
+    #[schemars(description = "Repository ID")]
+    pub repo_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UnwatchWorkspaceInput {
+    #[schemars(description = "Absolute path to workspace directory to stop watching")]
+    pub workspace_path: String,
+}
+
 // ── Server ────────────────────────────────────────────────────────────────────
 
 /// The fossil-mcp MCP server.
 #[derive(Clone)]
-pub struct FossilServer;
+pub struct FossilServer {
+    watchers: Arc<Mutex<HashMap<String, WorkspaceWatcher>>>,
+}
 
 impl FossilServer {
     pub fn new() -> Self {
-        Self
+        Self {
+            watchers: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 }
 
@@ -815,6 +856,198 @@ impl FossilServer {
 
         Ok(result.to_string())
     }
+
+    // ── Incremental Indexing & Watcher ───────────────────────────────────────
+
+    #[tool(
+        description = "Re-indexes a single modified/created file and atomically updates DB symbols."
+    )]
+    async fn update_file_index(
+        &self,
+        Parameters(input): Parameters<UpdateFileIndexInput>,
+    ) -> Result<String, McpError> {
+        info!(
+            "update_file_index: repo_id={} file={}",
+            input.repo_id, input.file_path
+        );
+        let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
+            let workspace = std::path::Path::new(&input.workspace_path);
+            let abs_file_path = if std::path::Path::new(&input.file_path).is_absolute() {
+                std::path::PathBuf::from(&input.file_path)
+            } else {
+                workspace.join(&input.file_path)
+            };
+
+            if !abs_file_path.exists() || !abs_file_path.is_file() {
+                return Err(format!(
+                    "File '{}' not found or not a file",
+                    abs_file_path.display()
+                ));
+            }
+
+            let store =
+                fossil_core::storage::GlobalStore::open(&fossil_core::storage::global_db_path())
+                    .map_err(|e| e.to_string())?;
+            let registry = default_registry();
+
+            let (symbols, edges) =
+                index_single_file(&abs_file_path, workspace, &input.repo_id, &registry)
+                    .map_err(|e| e.to_string())?;
+
+            let rel_path = abs_file_path
+                .strip_prefix(workspace)
+                .unwrap_or(&abs_file_path)
+                .to_string_lossy()
+                .to_string();
+
+            let inserted = store
+                .update_file_symbols(&input.repo_id, &rel_path, &symbols, &edges)
+                .map_err(|e| e.to_string())?;
+
+            Ok(json!({
+                "status": "updated",
+                "repo_id": input.repo_id,
+                "file_path": rel_path,
+                "symbol_count": inserted.len(),
+                "call_edge_count": edges.len(),
+            }))
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        .map_err(|e| McpError::internal_error(e, None))?;
+
+        Ok(result.to_string())
+    }
+
+    #[tool(
+        description = "Removes all indexed symbols, call edges, and vectors for a deleted file."
+    )]
+    async fn remove_file_index(
+        &self,
+        Parameters(input): Parameters<RemoveFileIndexInput>,
+    ) -> Result<String, McpError> {
+        info!(
+            "remove_file_index: repo_id={} file={}",
+            input.repo_id, input.file_path
+        );
+        let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
+            let workspace = std::path::Path::new(&input.workspace_path);
+            let abs_file_path = if std::path::Path::new(&input.file_path).is_absolute() {
+                std::path::PathBuf::from(&input.file_path)
+            } else {
+                workspace.join(&input.file_path)
+            };
+
+            let rel_path = abs_file_path
+                .strip_prefix(workspace)
+                .unwrap_or(&abs_file_path)
+                .to_string_lossy()
+                .to_string();
+
+            let store =
+                fossil_core::storage::GlobalStore::open(&fossil_core::storage::global_db_path())
+                    .map_err(|e| e.to_string())?;
+
+            let removed_count = store
+                .remove_file_symbols(&input.repo_id, &rel_path)
+                .map_err(|e| e.to_string())?;
+
+            Ok(json!({
+                "status": "removed",
+                "repo_id": input.repo_id,
+                "file_path": rel_path,
+                "removed_symbol_count": removed_count,
+            }))
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        .map_err(|e| McpError::internal_error(e, None))?;
+
+        Ok(result.to_string())
+    }
+
+    #[tool(
+        description = "Starts a background filesystem watcher (notify) on a workspace to auto-update modified files."
+    )]
+    async fn watch_workspace(
+        &self,
+        Parameters(input): Parameters<WatchWorkspaceInput>,
+    ) -> Result<String, McpError> {
+        info!(
+            "watch_workspace: path={} repo_id={}",
+            input.workspace_path, input.repo_id
+        );
+
+        let workspace_buf = std::path::PathBuf::from(&input.workspace_path);
+        if !workspace_buf.exists() || !workspace_buf.is_dir() {
+            return Err(McpError::invalid_params(
+                "workspace_path does not exist or is not a directory",
+                None,
+            ));
+        }
+
+        let store =
+            fossil_core::storage::GlobalStore::open(&fossil_core::storage::global_db_path())
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let registry = default_registry();
+
+        let watcher = WorkspaceWatcher::start(
+            workspace_buf.clone(),
+            input.repo_id.clone(),
+            store,
+            registry,
+            std::time::Duration::from_secs(1),
+        )
+        .map_err(|e| McpError::internal_error(e, None))?;
+
+        {
+            let mut map = self.watchers.lock().unwrap();
+            if let Some(old) = map.remove(&input.workspace_path) {
+                old.stop();
+            }
+            map.insert(input.workspace_path.clone(), watcher);
+        }
+
+        Ok(json!({
+            "status": "watching",
+            "workspace_path": input.workspace_path,
+            "repo_id": input.repo_id,
+            "debounce_seconds": 1,
+        })
+        .to_string())
+    }
+
+    #[tool(description = "Stops an active background filesystem watcher on a workspace.")]
+    async fn unwatch_workspace(
+        &self,
+        Parameters(input): Parameters<UnwatchWorkspaceInput>,
+    ) -> Result<String, McpError> {
+        info!("unwatch_workspace: path={}", input.workspace_path);
+
+        let stopped = {
+            let mut map = self.watchers.lock().unwrap();
+            if let Some(watcher) = map.remove(&input.workspace_path) {
+                watcher.stop();
+                true
+            } else {
+                false
+            }
+        };
+
+        if stopped {
+            Ok(json!({
+                "status": "unwatched",
+                "workspace_path": input.workspace_path,
+            })
+            .to_string())
+        } else {
+            Ok(json!({
+                "status": "not_found",
+                "message": format!("No active watcher for '{}'", input.workspace_path),
+            })
+            .to_string())
+        }
+    }
 }
 
 #[tool_handler(
@@ -838,9 +1071,7 @@ mod tests {
     }
 
     fn init_tracing() {
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter("info")
-            .try_init();
+        let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
     }
 
     // ── E2E: full analyze_feature pipeline ──────────────────────────────────
@@ -937,7 +1168,10 @@ mod tests {
         let search_val: serde_json::Value =
             serde_json::from_str(&search_res).expect("search response must be valid JSON");
         assert!(
-            !search_val["matches"].as_array().unwrap_or(&vec![]).is_empty(),
+            !search_val["matches"]
+                .as_array()
+                .unwrap_or(&vec![])
+                .is_empty(),
             "search must return at least one match"
         );
     }
