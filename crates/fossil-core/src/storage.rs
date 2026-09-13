@@ -10,6 +10,8 @@ use tracing::debug;
 use crate::error::StorageError;
 use crate::types::{CallEdge, RepoMeta, Symbol, SymbolKind, SymbolSource};
 
+pub const CACHE_DIR_ENV: &str = "FOSSIL_CACHE_DIR";
+
 /// Manages the SQLite index database globally across all repositories.
 ///
 /// All repositories share the same `global.db` file.
@@ -20,6 +22,13 @@ pub struct GlobalStore {
 impl GlobalStore {
     /// Open (or create) the index database at `db_path`.
     pub fn open(db_path: &Path) -> Result<Self, StorageError> {
+        if db_path != Path::new(":memory:")
+            && let Some(parent) = db_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
+        }
+
         // Register the sqlite-vec extension globally for all connections (once).
         static INIT_VEC: Once = Once::new();
         INIT_VEC.call_once(|| unsafe {
@@ -797,6 +806,12 @@ impl GlobalStore {
 
 /// Canonical path for the global fossil-mcp cache directory.
 pub fn cache_root() -> PathBuf {
+    if let Some(path) = std::env::var_os(CACHE_DIR_ENV)
+        && !path.is_empty()
+    {
+        return PathBuf::from(path);
+    }
+
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".fossil-mcp")
@@ -815,6 +830,26 @@ mod tests {
 
     fn get_test_store() -> GlobalStore {
         GlobalStore::open(std::path::Path::new(":memory:")).unwrap()
+    }
+
+    #[test]
+    fn open_creates_parent_directory_for_file_db() {
+        let unique = format!(
+            "fossil-core-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        let db_path = dir.join("nested").join("global.db");
+
+        assert!(!db_path.parent().unwrap().exists());
+        let store = GlobalStore::open(&db_path).unwrap();
+        drop(store);
+
+        assert!(db_path.exists());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

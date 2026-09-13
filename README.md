@@ -417,6 +417,9 @@ fossil-server
 - `FOSSIL_LOG` controls tracing filters.
 - The default filter is suitable for MCP stdio because logs are written to stderr.
 - Use `FOSSIL_LOG=fossil_server=debug,warn` for local debugging.
+- `FOSSIL_CACHE_DIR` overrides the default cache root.
+- When `FOSSIL_CACHE_DIR` is unset, fossil-mcp uses `~/.fossil-mcp/cache`.
+- The SQLite index database is stored as `global.db` inside the cache root.
 - Avoid writing logs to stdout because stdout is reserved for the MCP transport.
 
 ## Development

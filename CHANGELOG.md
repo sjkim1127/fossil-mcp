@@ -25,6 +25,7 @@ Releases follow [Semantic Versioning](https://semver.org/).
 ### Fixed
 - Removed dependency-indexer warnings that failed CI with `-D warnings`.
 - Ignored macOS Finder metadata files.
+- Honored `FOSSIL_CACHE_DIR` and create SQLite parent directories automatically.
 
 ---
 
