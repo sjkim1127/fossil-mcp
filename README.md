@@ -254,6 +254,7 @@ For verbose server-side logging during local development:
 
 - `workspace_path` is required and must be an absolute path to a local directory.
 - The scanner walks parser-supported source files under that directory.
+- Built-in patterns currently cover Python SQL string composition, Python `shell=True`, and JavaScript/TypeScript dynamic evaluation.
 - The output is structural matches that still require human validation.
 - Use this as a triage aid rather than a vulnerability verdict.
 
@@ -329,7 +330,7 @@ The exact JSON is returned as a string through MCP tool responses. Clients usual
 - `[]`
 - `[].file_path`
 - `[].line_number`
-- `[].cve_id`
+- `[].cve_id` legacy field containing the fossil pattern id
 - `[].description`
 - `[].secure_snippet`
 

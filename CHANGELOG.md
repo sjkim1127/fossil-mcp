@@ -21,6 +21,7 @@ Releases follow [Semantic Versioning](https://semver.org/).
 ### Changed
 - README now documents the full MCP tool surface and current output contracts.
 - CI product baseline now includes warning-free Clippy checks.
+- Vulnerability scanning now uses named built-in heuristic patterns instead of mock CVE exact matching.
 
 ### Fixed
 - Removed dependency-indexer warnings that failed CI with `-D warnings`.
