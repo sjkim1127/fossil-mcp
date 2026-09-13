@@ -40,7 +40,7 @@ git push origin v0.2.0
 
 | 파일 | 플랫폼 |
 |---|---|
-| `fossil-mcp-vX.Y.Z-x86_64-unknown-linux-musl.tar.gz` | Linux x86\_64 (정적 링킹) |
+| `fossil-mcp-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` | Linux x86\_64 |
 | `fossil-mcp-vX.Y.Z-aarch64-unknown-linux-gnu.tar.gz` | Linux ARM64 |
 | `fossil-mcp-vX.Y.Z-x86_64-apple-darwin.tar.gz` | macOS Intel |
 | `fossil-mcp-vX.Y.Z-aarch64-apple-darwin.tar.gz` | macOS Apple Silicon |
@@ -73,6 +73,6 @@ git push origin v0.1.1
 # macOS Apple Silicon 기준
 cargo build --release --locked --bin fossil-mcp
 
-# Linux musl (Docker 또는 musl-cross 설치 후)
-cargo build --release --locked --bin fossil-mcp --target x86_64-unknown-linux-musl
+# Linux x86_64 GNU
+cargo build --release --locked --bin fossil-mcp --target x86_64-unknown-linux-gnu
 ```

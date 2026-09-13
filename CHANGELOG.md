@@ -10,7 +10,21 @@ Releases follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Nothing yet.
+- Semantic search storage through local SQLite vector tables.
+- SCIP index support when `index.scip` is present, with tree-sitter fallback.
+- One-shot `analyze_feature` workflow for clone, index, and search.
+- Structural migration analysis through `analyze_migration`.
+- Local workspace vulnerability pattern scanning through `scan_vulnerabilities`.
+- Transitive dependency indexing tools for Rust, Python, JavaScript/TypeScript, and C/C++ package caches.
+- Incremental file indexing and workspace watcher tools for local workspaces.
+
+### Changed
+- README now documents the full MCP tool surface and current output contracts.
+- CI product baseline now includes warning-free Clippy checks.
+
+### Fixed
+- Removed dependency-indexer warnings that failed CI with `-D warnings`.
+- Ignored macOS Finder metadata files.
 
 ---
 
