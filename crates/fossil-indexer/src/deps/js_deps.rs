@@ -2,7 +2,7 @@
 //!
 //! Parses package.json and indexes source from node_modules.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use fossil_core::{storage::GlobalStore, types::SymbolSource};
 use serde::Deserialize;

@@ -8,10 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fossil_core::{
-    storage::GlobalStore,
-    types::{CallEdge, Symbol, SymbolSource},
-};
+use fossil_core::{storage::GlobalStore, types::SymbolSource};
 use serde::Deserialize;
 use tracing::{debug, info, warn};
 

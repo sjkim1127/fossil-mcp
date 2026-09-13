@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use fossil_core::{storage::GlobalStore, types::SymbolSource};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use super::DepIndexResult;
 use crate::error::IndexError;

@@ -65,6 +65,11 @@ It is intentionally modest in scope: it does not claim to understand every behav
 - Return source snippets by repository id, relative file path, and inclusive line range.
 - List cached and indexed repositories.
 - Run a one-shot clone, index, and locate flow through `analyze_feature`.
+- Analyze structural migration patterns between two git revisions.
+- Scan local workspaces for structural vulnerability patterns.
+- Index local Rust, Python, JavaScript/TypeScript, and C/C++ dependency sources where package manager caches are available.
+- Update or remove a single file from the index without re-indexing the whole workspace.
+- Watch a local workspace and update changed files after a short debounce.
 - Evict old cached repositories when the cache exceeds the configured internal capacity limit.
 
 ## Non-goals
@@ -171,6 +176,16 @@ For verbose server-side logging during local development:
 | `get_symbol_source` | Read a specific relative file path and inclusive line range. | Inspect or cite source |
 | `list_indexed_repos` | List cached repository metadata. | Choose a `repo_id` |
 | `analyze_feature` | Clone, index when needed, and locate in one call. | Inspect candidates |
+| `analyze_migration` | Compare two git revisions and extract structural migration patterns. | Review changed APIs |
+| `scan_vulnerabilities` | Scan a local workspace for built-in structural vulnerability patterns. | Inspect matches manually |
+| `index_rust_deps` | Index transitive Rust dependencies from the local Cargo registry cache. | Search external dependency code |
+| `index_python_deps` | Index Python dependencies from local site-packages. | Search external dependency code |
+| `index_js_deps` | Index package.json dependencies from local node_modules. | Search external dependency code |
+| `index_cpp_deps` | Index C/C++ dependencies from local package-manager install paths. | Search external dependency code |
+| `update_file_index` | Re-index one changed file and replace its stored symbols. | Continue incremental search |
+| `remove_file_index` | Remove stored symbols and vectors for a deleted file. | Keep index clean |
+| `watch_workspace` | Start a background watcher that updates changed files. | Edit code while keeping index fresh |
+| `unwatch_workspace` | Stop a background watcher for a workspace. | End live indexing |
 
 ### `clone_reference`
 
@@ -227,6 +242,39 @@ For verbose server-side logging during local development:
 - The tool calls `locate_implementation` with a broader top-k.
 - This is convenient for first-pass exploration.
 
+### `analyze_migration`
+
+- `repo_id` is required.
+- `start_revision` and `end_revision` are git revisions that must exist in the cached clone.
+- `file_pattern` selects files to compare.
+- The tool extracts structural before/after patterns from changed files.
+- Use this for migration research, not as a complete changelog generator.
+
+### `scan_vulnerabilities`
+
+- `workspace_path` is required and must be an absolute path to a local directory.
+- The scanner walks parser-supported source files under that directory.
+- The output is structural matches that still require human validation.
+- Use this as a triage aid rather than a vulnerability verdict.
+
+### Dependency indexers
+
+- `index_rust_deps` requires a workspace with `Cargo.lock` and local Cargo registry sources.
+- `index_python_deps` reads `requirements.txt` or `pyproject.toml` and local site-packages.
+- `index_js_deps` reads `package.json` and local `node_modules`; `include_dev` controls devDependencies.
+- `index_cpp_deps` looks for local vcpkg or Conan install layouts.
+- Dependency symbols are tagged as external dependency code in storage.
+- Already indexed package versions are skipped through the package index cache.
+
+### Incremental indexing
+
+- `update_file_index` requires `workspace_path`, `repo_id`, and `file_path`.
+- `remove_file_index` requires `workspace_path`, `repo_id`, and `file_path`.
+- `watch_workspace` requires `workspace_path` and `repo_id`.
+- `unwatch_workspace` requires `workspace_path`.
+- Watchers are in-process; restart them when the MCP server restarts.
+- Incremental indexing is for local workspaces where the server can read the file system directly.
+
 ## Output contracts
 
 The exact JSON is returned as a string through MCP tool responses. Clients usually parse the string before presenting it.
@@ -268,6 +316,41 @@ The exact JSON is returned as a string through MCP tool responses. Clients usual
 - `repos[].path`
 - `repos[].indexed_at`
 - `repos[].symbol_count`
+
+### `analyze_migration` fields
+
+- `[]`
+- `[].file_path`
+- `[].before_snippet`
+- `[].after_snippet`
+
+### `scan_vulnerabilities` fields
+
+- `[]`
+- `[].file_path`
+- `[].line_number`
+- `[].cve_id`
+- `[].description`
+- `[].secure_snippet`
+
+### Dependency indexer fields
+
+- `message`
+- `details[].package`
+- `details[].version`
+- `details[].symbols`
+- `details[].cached`
+
+### Incremental indexing fields
+
+- `status`
+- `repo_id`
+- `workspace_path`
+- `file_path`
+- `symbol_count`
+- `call_edge_count`
+- `removed_symbol_count`
+- `debounce_seconds`
 
 ## Architecture
 

@@ -124,7 +124,7 @@ fn discover_cpp_packages(workspace: &Path) -> Result<Vec<(String, String, PathBu
     // Strategy 3: conanfile.txt
     let conanfile = workspace.join("conanfile.txt");
     if conanfile.exists() {
-        packages.extend(scan_conan_packages(workspace));
+        packages.extend(scan_conan_packages());
     }
 
     Ok(packages)
@@ -154,7 +154,7 @@ fn scan_vcpkg_installed(vcpkg_installed: &Path) -> Vec<(String, String, PathBuf)
 }
 
 /// Scan conan package cache directory.
-fn scan_conan_packages(workspace: &Path) -> Vec<(String, String, PathBuf)> {
+fn scan_conan_packages() -> Vec<(String, String, PathBuf)> {
     let mut result = Vec::new();
     // Conan 2.x: ~/.conan2/p/<name>/
     let conan_home = dirs::home_dir()
