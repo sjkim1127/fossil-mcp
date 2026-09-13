@@ -212,13 +212,12 @@ fn find_site_packages() -> Vec<PathBuf> {
             "import site; [print(p) for p in site.getsitepackages()]",
         ])
         .output()
+        && out.status.success()
     {
-        if out.status.success() {
-            for line in String::from_utf8_lossy(&out.stdout).lines() {
-                let p = PathBuf::from(line.trim());
-                if p.is_dir() {
-                    paths.push(p);
-                }
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            let p = PathBuf::from(line.trim());
+            if p.is_dir() {
+                paths.push(p);
             }
         }
     }

@@ -52,7 +52,7 @@ pub fn index_js_deps(
 
     let mut all_deps: Vec<(String, String)> = pkg.dependencies.into_iter().collect();
     if include_dev {
-        all_deps.extend(pkg.dev_dependencies.into_iter());
+        all_deps.extend(pkg.dev_dependencies);
     }
 
     info!("Found {} JS/TS dependencies to index", all_deps.len());

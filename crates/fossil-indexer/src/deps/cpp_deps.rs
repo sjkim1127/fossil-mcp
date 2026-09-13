@@ -162,14 +162,14 @@ fn scan_conan_packages() -> Vec<(String, String, PathBuf)> {
         .join(".conan2")
         .join("p");
 
-    if conan_home.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&conan_home) {
-            for entry in entries.flatten() {
-                let include = entry.path().join("p").join("include");
-                if include.is_dir() {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    result.push((name, "conan".to_string(), include));
-                }
+    if conan_home.is_dir()
+        && let Ok(entries) = std::fs::read_dir(&conan_home)
+    {
+        for entry in entries.flatten() {
+            let include = entry.path().join("p").join("include");
+            if include.is_dir() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                result.push((name, "conan".to_string(), include));
             }
         }
     }
