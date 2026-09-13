@@ -330,6 +330,8 @@ The exact JSON is returned as a string through MCP tool responses. Clients usual
 - `[]`
 - `[].file_path`
 - `[].line_number`
+- `[].pattern_id`
+- `[].severity`
 - `[].cve_id` legacy field containing the fossil pattern id
 - `[].description`
 - `[].secure_snippet`
